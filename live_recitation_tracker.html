@@ -178,6 +178,7 @@
     background: var(--gold);
   }
   .word.correct{ color: var(--green); }
+  .word.blank{ color: transparent; }
   .word.mistake{
     color: var(--red);
     text-decoration: underline wavy rgba(229,72,77,0.6);
@@ -298,8 +299,8 @@
             <span>Highlight each word after I recite it</span>
           </label>
           <label class="settings-option">
-            <input type="radio" name="highlightMode" value="preview">
-            <span>Preview the next word while reciting</span>
+            <input type="radio" name="highlightMode" value="blank">
+            <span>Hide the script — words appear only as I recite them</span>
           </label>
         </div>
       </div>
@@ -636,15 +637,15 @@ function updateStats(){
   document.getElementById('statAyahs').textContent = ayahsHeard;
 }
 
-let highlightMode = 'reveal'; // 'reveal' = highlight only after recited, 'preview' = show upcoming word
+let highlightMode = 'reveal'; // 'reveal' = dim text visible ahead, 'blank' = text hidden until recited
 
 function highlightCurrent(){
   refWords.forEach((w, i) => {
-    w.el.classList.remove('pending','current','correct','mistake');
+    w.el.classList.remove('pending','current','correct','mistake','blank');
     if(i < pointer){
       w.el.classList.add(w.el.dataset.status || 'correct');
-    } else if(i === pointer && highlightMode === 'preview'){
-      w.el.classList.add('current');
+    } else if(highlightMode === 'blank'){
+      w.el.classList.add('blank');
     } else {
       w.el.classList.add('pending');
     }
@@ -724,11 +725,10 @@ async function startListening(){
       transcriptText.textContent = fullText;
     }
     const words = fullText.length ? fullText.split(/\s+/) : [];
-    const stableCount = interim.trim().length ? words.length - 1 : words.length;
-    for(let i = committedWordCount; i < stableCount; i++){
+    for(let i = committedWordCount; i < words.length; i++){
       processNewWord(words[i]);
     }
-    if(stableCount > committedWordCount) committedWordCount = stableCount;
+    if(words.length > committedWordCount) committedWordCount = words.length;
   };
 
   recognition.onerror = (e) => {
