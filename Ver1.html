@@ -390,7 +390,10 @@ async function fetchSurahText(num){
 function normalize(word){
   return word
     .replace(/[\u064B-\u0652\u0670\u06D6-\u06ED\u0640]/g, "")
-    .replace(/[إأآا]/g, "ا")
+    .replace(/[إأآاٱ]/g, "ا")
+    .replace(/ی/g, "ي")
+    .replace(/ک/g, "ك")
+    .replace(/ھ/g, "ه")
     .replace(/ى/g, "ي")
     .replace(/ة/g, "ه")
     .replace(/[^\u0600-\u06FF]/g, "")
@@ -406,7 +409,7 @@ function extractBismillah(ayahText){
   const words = ayahText.trim().split(/\s+/);
   if(words.length <= 4) return null; // ayah must have content beyond the bismillah
   for(let i=0;i<4;i++){
-    if(normalize(words[i]) !== BISMILLAH_NORM[i]) return null;
+    if(!isFuzzyMatch(normalize(words[i]), BISMILLAH_NORM[i])) return null;
   }
   return { rest: words.slice(4).join(' ') };
 }
