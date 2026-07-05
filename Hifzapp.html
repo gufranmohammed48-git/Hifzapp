@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Recitation Tracker — Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0A1220;
+    --panel: #101A2C;
+    --card: #131F33;
+    --card-hover: #182640;
+    --border: rgba(255,255,255,0.08);
+    --text: #E8EDF4;
+    --text-dim: #8A96A8;
+    --green: #2ECC71;
+    --green-soft: rgba(46,204,113,0.14);
+    --gold: #D4A94A;
+    --gold-soft: rgba(212,169,74,0.16);
+    --red: #E5484D;
+    --gray-missed: #6B7686;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; min-height:100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family:'Inter', sans-serif;
+  }
+  .app{ max-width: 900px; margin: 0 auto; padding: 32px 20px 80px; }
+
+  .panel{ margin-bottom: 40px; }
+  .panel.disabled{ opacity: .45; pointer-events: none; }
+
+  .step-head{ display:flex; gap:14px; align-items:flex-start; margin-bottom: 18px; }
+  .step-badge{
+    flex: none;
+    width:32px; height:32px; border-radius:50%;
+    background: var(--green); color:#06210F;
+    font-weight:700; font-size:15px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .step-head h2{ margin: 2px 0 4px; font-size: 22px; font-weight:700; }
+  .step-head p{ margin:0; color: var(--text-dim); font-size: 14px; line-height:1.5; max-width: 520px; }
+
+  #searchInput{
+    width:100%;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 12px;
+    padding: 13px 16px;
+    font-family:'Inter'; font-size: 14px;
+    margin-bottom: 18px;
+  }
+  #searchInput::placeholder{ color: var(--text-dim); }
+  #searchInput:focus{ outline: none; border-color: var(--green); }
+
+  .surah-grid{
+    display:grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  @media (max-width: 720px){ .surah-grid{ grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 460px){ .surah-grid{ grid-template-columns: 1fr; } }
+
+  .surah-card{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: background .15s ease, transform .1s ease;
+  }
+  .surah-card:hover{ background: var(--card-hover); }
+  .surah-card:active{ transform: scale(0.98); }
+  .surah-card.unavailable{ opacity:.45; }
+  .surah-card.selected{ border-color: var(--green); background: var(--green-soft); }
+  .surah-card .num{ font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+  .surah-card .arabic{ font-family:'Amiri', serif; font-size: 22px; direction: rtl; margin-bottom: 4px; }
+  .surah-card .translit{ font-size: 13px; font-weight:600; }
+  .surah-card .meaning{ font-size: 12px; color: var(--text-dim); }
+  .surah-card .ayahs{ font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+  .surah-card .tag{
+    display:inline-block; margin-top:6px;
+    font-size: 10px; letter-spacing:.04em; text-transform:uppercase;
+    color: var(--gold); background: var(--gold-soft);
+    padding: 2px 7px; border-radius: 999px;
+  }
+
+  .pick-status{
+    min-height: 18px; margin-top: 12px;
+    font-size: 13px; color: var(--gold);
+  }
+
+  .recite-card{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px;
+  }
+
+  .ayah-scroll{
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 6px 10px;
+    margin-bottom: 18px;
+  }
+  .ayah{
+    direction: rtl;
+    font-family:'Amiri', serif;
+    font-size: clamp(22px, 4vw, 28px);
+    line-height: 2.1;
+    text-align: right;
+  }
+  .bismillah{
+    text-align: center;
+    font-family:'Amiri', serif;
+    font-size: clamp(22px, 4.2vw, 30px);
+    color: var(--gold);
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ayah-divider{
+    text-align:center;
+    color: rgba(255,255,255,0.18);
+    font-size: 14px;
+    margin: 8px 0;
+  }
+  .word{
+    display:inline-block;
+    position:relative;
+    padding: 2px 3px;
+    border-radius: 6px;
+    transition: color .2s ease, background .2s ease;
+    color: rgba(232,237,244,0.35);
+  }
+  .word.current{ color: var(--text); background: var(--gold-soft); }
+  .word.current::before{
+    content:"";
+    position:absolute; left:50%; top:-12px;
+    width:5px; height:5px;
+    transform: translateX(-50%) rotate(45deg);
+    background: var(--gold);
+  }
+  .word.correct{ color: var(--green); }
+  .word.mistake{
+    color: var(--red);
+    text-decoration: underline wavy rgba(229,72,77,0.6);
+    text-underline-offset: 5px;
+  }
+  .ayah-num{
+    font-family:'Amiri', serif;
+    color: var(--green);
+    font-size: 0.65em;
+    margin: 0 2px;
+  }
+
+  .mic-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom: 8px; }
+  button{
+    font-family:'Inter'; font-weight:600; font-size:14px;
+    border-radius: 999px; border: 1px solid transparent;
+    padding: 11px 22px; cursor:pointer;
+    transition: transform .15s ease, background .2s ease;
+    display:inline-flex; align-items:center; gap:8px;
+  }
+  button:active{ transform: scale(0.97); }
+  #micBtn{ background: var(--green); color: #06210F; }
+  #micBtn.listening{ background: var(--red); color: var(--text); }
+  #resetBtn{ background: transparent; color: var(--text-dim); border-color: var(--border); }
+  .dot{ width:8px; height:8px; border-radius:50%; background: currentColor; }
+  .dot.pulse{ animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.3; } }
+
+  .status{ min-height: 18px; font-size: 13px; color: var(--text-dim); margin-bottom: 18px; }
+  .status.warn{ color: var(--red); }
+
+  .stats-grid{
+    display:grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  @media (max-width: 620px){ .stats-grid{ grid-template-columns: repeat(3, 1fr); } }
+  .stat{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 8px;
+    text-align:center;
+  }
+  .stat-value{ font-size: 20px; font-weight:700; }
+  .stat-label{ font-size: 10.5px; letter-spacing:.03em; text-transform:uppercase; color: var(--text-dim); margin-top: 3px; }
+  .stat.correct .stat-value{ color: var(--green); }
+  .stat.wrong .stat-value{ color: var(--red); }
+  .stat.missed .stat-value{ color: var(--gray-missed); }
+
+  .playback-row{
+    display:flex; align-items:center; gap:12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+  }
+  .playback-row.hidden{ display:none; }
+  #playBtn{
+    padding: 8px 12px; background: var(--green); color:#06210F; border-radius: 50%;
+    width: 34px; height:34px; justify-content:center;
+  }
+  .progress-track{
+    flex:1; height:4px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow:hidden;
+  }
+  .progress-fill{ height:100%; width:0%; background: var(--green); }
+  .time{ font-size: 12px; color: var(--text-dim); white-space:nowrap; }
+
+  .transcript-box{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .transcript-box.hidden{ display:none; }
+  .transcript-head{
+    font-size: 10.5px; letter-spacing:.05em; text-transform:uppercase;
+    color: var(--text-dim); margin-bottom: 8px;
+  }
+  .transcript-head span{ color: var(--green); text-transform:none; letter-spacing:0; }
+  .transcript-text{ font-family:'Amiri', serif; font-size: 19px; line-height:1.8; color: var(--text); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <section class="panel" id="step1">
+    <div class="step-head">
+      <span class="step-badge">1</span>
+      <div>
+        <h2>Pick a surah</h2>
+        <p>Pick any surah — recite it, then watch the highlight follow your voice word by word.</p>
+      </div>
+    </div>
+    <input id="searchInput" placeholder="Search surahs (1, Al-Fatiha, الفاتحة...)">
+    <div class="surah-grid" id="surahGrid"></div>
+    <div class="pick-status" id="pickStatus"></div>
+  </section>
+
+  <section class="panel disabled" id="step2">
+    <div class="step-head">
+      <span class="step-badge">2</span>
+      <div>
+        <h2 id="step2Title">Recite</h2>
+        <p id="step2Sub">Tap the mic and recite any portion. Words highlight as the app hears them.</p>
+      </div>
+    </div>
+
+    <div class="recite-card">
+      <div class="ayah-scroll" id="ayahScroll"><div id="ayahContainer"></div></div>
+
+      <div class="mic-row">
+        <button id="micBtn"><span class="dot" id="micDot"></span><span id="micLabel">Start reciting</span></button>
+        <button id="resetBtn">Reset</button>
+      </div>
+      <div class="status" id="status">Works best in Chrome on desktop or Android.</div>
+
+      <div class="stats-grid">
+        <div class="stat"><div class="stat-value" id="statAccuracy">0%</div><div class="stat-label">Accuracy</div></div>
+        <div class="stat"><div class="stat-value" id="statAyahs">0</div><div class="stat-label">Ayahs heard</div></div>
+        <div class="stat correct"><div class="stat-value" id="statCorrect">0</div><div class="stat-label">Correct</div></div>
+        <div class="stat wrong"><div class="stat-value" id="statWrong">0</div><div class="stat-label">Wrong</div></div>
+        <div class="stat missed"><div class="stat-value" id="statMissed">0</div><div class="stat-label">Missed</div></div>
+      </div>
+
+      <div class="playback-row hidden" id="playbackRow">
+        <button id="playBtn">▶</button>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="time" id="timeLabel">0:00 / 0:00</div>
+      </div>
+      <audio id="playbackAudio" hidden></audio>
+
+      <div class="transcript-box hidden" id="transcriptBox">
+        <div class="transcript-head">Transcribed audio <span id="transcriptConf"></span></div>
+        <div class="transcript-text" id="transcriptText" dir="rtl"></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+// ---- Surah metadata (all 114, for browsing/search) ----
+const SURAH_META = [
+  [1,"Al-Fatiha","الفاتحة","The Opening",7],[2,"Al-Baqarah","البقرة","The Cow",286],
+  [3,"Aal-E-Imran","آل عمران","The Family of Imran",200],[4,"An-Nisa","النساء","The Women",176],
+  [5,"Al-Ma'idah","المائدة","The Table Spread",120],[6,"Al-An'am","الأنعام","The Cattle",165],
+  [7,"Al-A'raf","الأعراف","The Heights",206],[8,"Al-Anfal","الأنفال","The Spoils of War",75],
+  [9,"At-Tawbah","التوبة","The Repentance",129],[10,"Yunus","يونس","Jonah",109],
+  [11,"Hud","هود","Hud",123],[12,"Yusuf","يوسف","Joseph",111],
+  [13,"Ar-Ra'd","الرعد","The Thunder",43],[14,"Ibrahim","ابراهيم","Abraham",52],
+  [15,"Al-Hijr","الحجر","The Rocky Tract",99],[16,"An-Nahl","النحل","The Bee",128],
+  [17,"Al-Isra","الإسراء","The Night Journey",111],[18,"Al-Kahf","الكهف","The Cave",110],
+  [19,"Maryam","مريم","Mary",98],[20,"Ta-Ha","طه","Ta-Ha",135],
+  [21,"Al-Anbiya","الأنبياء","The Prophets",112],[22,"Al-Hajj","الحج","The Pilgrimage",78],
+  [23,"Al-Mu'minun","المؤمنون","The Believers",118],[24,"An-Nur","النور","The Light",64],
+  [25,"Al-Furqan","الفرقان","The Criterion",77],[26,"Ash-Shu'ara","الشعراء","The Poets",227],
+  [27,"An-Naml","النمل","The Ant",93],[28,"Al-Qasas","القصص","The Stories",88],
+  [29,"Al-Ankabut","العنكبوت","The Spider",69],[30,"Ar-Rum","الروم","The Romans",60],
+  [31,"Luqman","لقمان","Luqman",34],[32,"As-Sajdah","السجدة","The Prostration",30],
+  [33,"Al-Ahzab","الأحزاب","The Combined Forces",73],[34,"Saba","سبإ","Sheba",54],
+  [35,"Fatir","فاطر","Originator",45],[36,"Ya-Sin","يس","Ya Sin",83],
+  [37,"As-Saffat","الصافات","Those Who Set The Ranks",182],[38,"Sad","ص","The Letter Saad",88],
+  [39,"Az-Zumar","الزمر","The Troops",75],[40,"Ghafir","غافر","The Forgiver",85],
+  [41,"Fussilat","فصلت","Explained In Detail",54],[42,"Ash-Shuraa","الشورى","The Consultation",53],
+  [43,"Az-Zukhruf","الزخرف","The Gold Adornments",89],[44,"Ad-Dukhan","الدخان","The Smoke",59],
+  [45,"Al-Jathiyah","الجاثية","The Crouching",37],[46,"Al-Ahqaf","الأحقاف","The Wind-Curved Sandhills",35],
+  [47,"Muhammad","محمد","Muhammad",38],[48,"Al-Fath","الفتح","The Victory",29],
+  [49,"Al-Hujurat","الحجرات","The Rooms",18],[50,"Qaf","ق","The Letter Qaf",45],
+  [51,"Adh-Dhariyat","الذاريات","The Winnowing Winds",60],[52,"At-Tur","الطور","The Mount",49],
+  [53,"An-Najm","النجم","The Star",62],[54,"Al-Qamar","القمر","The Moon",55],
+  [55,"Ar-Rahman","الرحمن","The Beneficent",78],[56,"Al-Waqi'ah","الواقعة","The Inevitable",96],
+  [57,"Al-Hadid","الحديد","The Iron",29],[58,"Al-Mujadila","المجادلة","The Pleading Woman",22],
+  [59,"Al-Hashr","الحشر","The Exile",24],[60,"Al-Mumtahanah","الممتحنة","She That Is To Be Examined",13],
+  [61,"As-Saf","الصف","The Ranks",14],[62,"Al-Jumu'ah","الجمعة","Friday",11],
+  [63,"Al-Munafiqun","المنافقون","The Hypocrites",11],[64,"At-Taghabun","التغابن","The Mutual Disillusion",18],
+  [65,"At-Talaq","الطلاق","Divorce",12],[66,"At-Tahrim","التحريم","The Prohibition",12],
+  [67,"Al-Mulk","الملك","The Sovereignty",30],[68,"Al-Qalam","القلم","The Pen",52],
+  [69,"Al-Haqqah","الحاقة","The Reality",52],[70,"Al-Ma'arij","المعارج","The Ascending Stairways",44],
+  [71,"Nuh","نوح","Noah",28],[72,"Al-Jinn","الجن","The Jinn",28],
+  [73,"Al-Muzzammil","المزمل","The Enshrouded One",20],[74,"Al-Muddaththir","المدثر","The Cloaked One",56],
+  [75,"Al-Qiyamah","القيامة","The Resurrection",40],[76,"Al-Insan","الانسان","The Man",31],
+  [77,"Al-Mursalat","المرسلات","The Emissaries",50],[78,"An-Naba","النبأ","The Tidings",40],
+  [79,"An-Nazi'at","النازعات","Those Who Drag Forth",46],[80,"Abasa","عبس","He Frowned",42],
+  [81,"At-Takwir","التكوير","The Overthrowing",29],[82,"Al-Infitar","الانفطار","The Cleaving",19],
+  [83,"Al-Mutaffifin","المطففين","The Defrauding",36],[84,"Al-Inshiqaq","الانشقاق","The Sundering",25],
+  [85,"Al-Buruj","البروج","The Mansions Of The Stars",22],[86,"At-Tariq","الطارق","The Morning Star",17],
+  [87,"Al-A'la","الأعلى","The Most High",19],[88,"Al-Ghashiyah","الغاشية","The Overwhelming",26],
+  [89,"Al-Fajr","الفجر","The Dawn",30],[90,"Al-Balad","البلد","The City",20],
+  [91,"Ash-Shams","الشمس","The Sun",15],[92,"Al-Layl","الليل","The Night",21],
+  [93,"Ad-Duhaa","الضحى","The Morning Hours",11],[94,"Ash-Sharh","الشرح","The Relief",8],
+  [95,"At-Tin","التين","The Fig",8],[96,"Al-Alaq","العلق","The Clot",19],
+  [97,"Al-Qadr","القدر","The Power",5],[98,"Al-Bayyinah","البينة","The Clear Proof",8],
+  [99,"Az-Zalzalah","الزلزلة","The Earthquake",8],[100,"Al-Adiyat","العاديات","The Courser",11],
+  [101,"Al-Qari'ah","القارعة","The Calamity",11],[102,"At-Takathur","التكاثر","The Rivalry In World Increase",8],
+  [103,"Al-Asr","العصر","The Declining Day",3],[104,"Al-Humazah","الهمزة","The Traducer",9],
+  [105,"Al-Fil","الفيل","The Elephant",5],[106,"Quraysh","قريش","Quraysh",4],
+  [107,"Al-Ma'un","الماعون","The Small Kindnesses",7],[108,"Al-Kawthar","الكوثر","The Abundance",3],
+  [109,"Al-Kafirun","الكافرون","The Disbelievers",6],[110,"An-Nasr","النصر","The Divine Support",3],
+  [111,"Al-Masad","المسد","The Palm Fiber",5],[112,"Al-Ikhlas","الإخلاص","The Sincerity",4],
+  [113,"Al-Falaq","الفلق","The Daybreak",5],[114,"An-Nas","الناس","Mankind",6]
+].map(([num,translit,arabic,meaning,ayahCount]) => ({num,translit,arabic,meaning,ayahCount}));
+
+// Local fallback for two short surahs (works even if the network request fails);
+// everything else is fetched live from the Al Quran Cloud API and cached here.
+const SURAH_TEXT_CACHE = {
+  1: [
+    "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
+    "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ",
+    "الرَّحْمَٰنِ الرَّحِيمِ",
+    "مَالِكِ يَوْمِ الدِّينِ",
+    "إِيَّاكَ نَعْبُدُ وَإِيَّاكَ نَسْتَعِينُ",
+    "اهْدِنَا الصِّرَاطَ الْمُسْتَقِيمَ",
+    "صِرَاطَ الَّذِينَ أَنْعَمْتَ عَلَيْهِمْ غَيْرِ الْمَغْضُوبِ عَلَيْهِمْ وَلَا الضَّالِّينَ"
+  ],
+  112: [
+    "قُلْ هُوَ اللَّهُ أَحَدٌ",
+    "اللَّهُ الصَّمَدُ",
+    "لَمْ يَلِدْ وَلَمْ يُولَدْ",
+    "وَلَمْ يَكُنْ لَهُ كُفُوًا أَحَدٌ"
+  ]
+};
+
+async function fetchSurahText(num){
+  if(SURAH_TEXT_CACHE[num]) return SURAH_TEXT_CACHE[num];
+  const res = await fetch(`https://api.alquran.cloud/v1/surah/${num}/quran-uthmani`);
+  if(!res.ok) throw new Error('Request failed: ' + res.status);
+  const data = await res.json();
+  if(data.code !== 200 || !data.data || !data.data.ayahs) throw new Error('Unexpected response');
+  const ayahs = data.data.ayahs.map(a => a.text);
+  SURAH_TEXT_CACHE[num] = ayahs;
+  return ayahs;
+}
+
+function normalize(word){
+  return word
+    .replace(/[\u064B-\u0652\u0670\u06D6-\u06ED\u0640]/g, "")
+    .replace(/[إأآا]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[^\u0600-\u06FF]/g, "")
+    .trim();
+}
+function toArabicDigits(n){
+  const map = ["٠","١","٢","٣","٤","٥","٦","٧","٨","٩"];
+  return String(n).split("").map(d => map[+d] ?? d).join("");
+}
+const BISMILLAH_TEXT = "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ";
+const BISMILLAH_NORM = ["بسم","الله","الرحمن","الرحيم"];
+function extractBismillah(ayahText){
+  const words = ayahText.trim().split(/\s+/);
+  if(words.length <= 4) return null; // ayah must have content beyond the bismillah
+  for(let i=0;i<4;i++){
+    if(normalize(words[i]) !== BISMILLAH_NORM[i]) return null;
+  }
+  return { rest: words.slice(4).join(' ') };
+}
+function levenshtein(a, b){
+  const m = a.length, n = b.length;
+  if(!m) return n; if(!n) return m;
+  const dp = Array.from({length:m+1}, ()=> new Array(n+1).fill(0));
+  for(let i=0;i<=m;i++) dp[i][0]=i;
+  for(let j=0;j<=n;j++) dp[0][j]=j;
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+function isFuzzyMatch(a, b){
+  if(!a || !b) return false;
+  const dist = levenshtein(a,b);
+  const threshold = Math.max(1, Math.floor(Math.max(a.length,b.length) * 0.34));
+  return dist <= threshold;
+}
+
+// ---- State ----
+let refWords = [];
+let ayahEndIndex = [];
+let pointer = 0;
+let stats = { correct:0, mistake:0 };
+let recognition = null;
+let listening = false;
+let committedWordCount = 0;
+let finalizedText = "";
+let confidences = [];
+let mediaStream = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let currentAudioURL = null;
+
+const surahGrid = document.getElementById('surahGrid');
+const searchInput = document.getElementById('searchInput');
+const pickStatus = document.getElementById('pickStatus');
+const step2 = document.getElementById('step2');
+const step2Title = document.getElementById('step2Title');
+const ayahContainer = document.getElementById('ayahContainer');
+const micBtn = document.getElementById('micBtn');
+const micLabel = document.getElementById('micLabel');
+const micDot = document.getElementById('micDot');
+const statusEl = document.getElementById('status');
+const playbackRow = document.getElementById('playbackRow');
+const playBtn = document.getElementById('playBtn');
+const progressFill = document.getElementById('progressFill');
+const timeLabel = document.getElementById('timeLabel');
+const playbackAudio = document.getElementById('playbackAudio');
+const transcriptBox = document.getElementById('transcriptBox');
+const transcriptText = document.getElementById('transcriptText');
+const transcriptConf = document.getElementById('transcriptConf');
+
+// ---- Surah picker ----
+function renderSurahGrid(filter){
+  const q = (filter || "").trim().toLowerCase();
+  surahGrid.innerHTML = "";
+  SURAH_META.forEach(s => {
+    if(q){
+      const hay = `${s.num} ${s.translit} ${s.meaning} ${s.arabic}`.toLowerCase();
+      if(!hay.includes(q)) return;
+    }
+    const card = document.createElement('div');
+    card.className = 'surah-card';
+    card.innerHTML = `
+      <div class="num">Surah ${s.num}</div>
+      <div class="arabic">${s.arabic}</div>
+      <div class="translit">${s.translit} · ${s.meaning}</div>
+      <div class="ayahs">${s.ayahCount} ayahs</div>
+    `;
+    card.addEventListener('click', () => selectSurah(s, card));
+    surahGrid.appendChild(card);
+  });
+}
+
+let currentSurahNum = null;
+
+async function selectSurah(s, cardEl){
+  pickStatus.textContent = `Loading ${s.translit}…`;
+  document.querySelectorAll('.surah-card.selected').forEach(el => el.classList.remove('selected'));
+  cardEl.classList.add('selected');
+  try{
+    const ayahs = await fetchSurahText(s.num);
+    pickStatus.textContent = "";
+    currentSurahNum = s.num;
+    step2.classList.remove('disabled');
+    step2Title.textContent = `Recite: ${s.translit} (${s.arabic})`;
+    buildSurah(s.num, ayahs);
+    step2.scrollIntoView({ behavior:'smooth', block:'start' });
+  }catch(e){
+    pickStatus.textContent = `Couldn't load ${s.translit} right now (${e.message}). Check your connection and try again.`;
+  }
+}
+
+searchInput.addEventListener('input', () => renderSurahGrid(searchInput.value));
+renderSurahGrid("");
+
+// ---- Reference text building ----
+function buildSurah(num, ayat){
+  stopListening();
+  refWords = [];
+  ayahEndIndex = [];
+  ayahContainer.innerHTML = "";
+
+  if(num !== 1 && ayat.length){
+    const extracted = extractBismillah(ayat[0]);
+    if(extracted){
+      ayat = [extracted.rest, ...ayat.slice(1)];
+      const heading = document.createElement('div');
+      heading.className = 'bismillah';
+      heading.textContent = BISMILLAH_TEXT;
+      ayahContainer.appendChild(heading);
+    }
+  }
+  ayat.forEach((ayahText, ai) => {
+    if(ai > 0){
+      const div = document.createElement('div');
+      div.className = 'ayah-divider';
+      div.textContent = '❖';
+      ayahContainer.appendChild(div);
+    }
+    const div = document.createElement('div');
+    div.className = 'ayah';
+    ayahText.split(/\s+/).forEach(w => {
+      const span = document.createElement('span');
+      span.className = 'word pending';
+      span.textContent = w;
+      div.appendChild(span);
+      div.appendChild(document.createTextNode(' '));
+      refWords.push({ text:w, norm: normalize(w), el: span });
+    });
+    const numSpan = document.createElement('span');
+    numSpan.className = 'ayah-num';
+    numSpan.textContent = `﴿${toArabicDigits(ai+1)}﴾`;
+    div.appendChild(numSpan);
+    ayahContainer.appendChild(div);
+    ayahEndIndex.push(refWords.length - 1);
+  });
+  pointer = 0;
+  stats = { correct:0, mistake:0 };
+  committedWordCount = 0;
+  finalizedText = "";
+  confidences = [];
+  playbackRow.classList.add('hidden');
+  transcriptBox.classList.add('hidden');
+  transcriptText.textContent = "";
+  statusEl.classList.remove('warn');
+  statusEl.textContent = "Tap the mic and recite any portion. Words highlight as the app hears them.";
+  updateStats();
+  highlightCurrent();
+}
+
+function updateStats(){
+  document.getElementById('statCorrect').textContent = stats.correct;
+  document.getElementById('statWrong').textContent = stats.mistake;
+  const total = stats.correct + stats.mistake;
+  const acc = total ? Math.round((stats.correct/total)*100) : 0;
+  document.getElementById('statAccuracy').textContent = acc + '%';
+  const ayahsHeard = ayahEndIndex.filter(end => pointer > end).length;
+  document.getElementById('statAyahs').textContent = ayahsHeard;
+}
+
+function highlightCurrent(){
+  refWords.forEach((w, i) => {
+    w.el.classList.remove('pending','current','correct','mistake');
+    if(i < pointer){
+      w.el.classList.add(w.el.dataset.status || 'correct');
+    } else if(i === pointer){
+      w.el.classList.add('current');
+    } else {
+      w.el.classList.add('pending');
+    }
+  });
+}
+
+function processNewWord(rawWord){
+  const norm = normalize(rawWord);
+  if(!norm) return;
+  const WINDOW = 6;
+  const windowEnd = Math.min(refWords.length, pointer + WINDOW);
+  let matchAt = -1;
+  for(let i = pointer; i < windowEnd; i++){
+    if(isFuzzyMatch(norm, refWords[i].norm)){ matchAt = i; break; }
+  }
+  if(matchAt === -1) return;
+  for(let i = pointer; i < matchAt; i++){
+    refWords[i].el.dataset.status = 'mistake';
+    stats.mistake++;
+  }
+  refWords[matchAt].el.dataset.status = 'correct';
+  stats.correct++;
+  pointer = matchAt + 1;
+  updateStats();
+  highlightCurrent();
+
+  if(pointer >= refWords.length){
+    statusEl.textContent = "Surah complete. Press reset to go again, or pick another surah.";
+    stopListening();
+  }
+}
+
+// ---- Speech recognition + audio recording ----
+function getRecognitionCtor(){
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+async function startListening(){
+  const Ctor = getRecognitionCtor();
+  if(!Ctor){
+    statusEl.textContent = "This browser doesn't support live speech recognition. Try Chrome on desktop or Android.";
+    statusEl.classList.add('warn');
+    return;
+  }
+  if(!refWords.length) return;
+
+  recognition = new Ctor();
+  recognition.lang = 'ar-SA';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event) => {
+    let interim = "";
+    for(let i = event.resultIndex; i < event.results.length; i++){
+      const res = event.results[i];
+      if(res.isFinal){
+        finalizedText += res[0].transcript + " ";
+        if(res[0].confidence > 0) confidences.push(res[0].confidence);
+      } else {
+        interim += res[0].transcript + " ";
+      }
+    }
+    const fullText = (finalizedText + interim).trim();
+    if(fullText){
+      transcriptBox.classList.remove('hidden');
+      transcriptText.textContent = fullText;
+    }
+    const words = fullText.length ? fullText.split(/\s+/) : [];
+    const stableCount = interim.trim().length ? words.length - 1 : words.length;
+    for(let i = committedWordCount; i < stableCount; i++){
+      processNewWord(words[i]);
+    }
+    if(stableCount > committedWordCount) committedWordCount = stableCount;
+  };
+
+  recognition.onerror = (e) => {
+    statusEl.textContent = "Mic error: " + e.error + ". Check microphone permissions.";
+    statusEl.classList.add('warn');
+  };
+
+  recognition.onend = () => {
+    if(listening){ try { recognition.start(); } catch(e) {} }
+  };
+
+  // Separate audio capture so we can play back what was recited
+  audioChunks = [];
+  try{
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    mediaRecorder = mimeType ? new MediaRecorder(mediaStream, { mimeType }) : new MediaRecorder(mediaStream);
+    mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      if(audioChunks.length){
+        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        if(currentAudioURL) URL.revokeObjectURL(currentAudioURL);
+        currentAudioURL = URL.createObjectURL(blob);
+        playbackAudio.src = currentAudioURL;
+        playbackRow.classList.remove('hidden');
+        progressFill.style.width = '0%';
+        timeLabel.textContent = '0:00 / 0:00';
+        playBtn.textContent = '▶';
+      }
+      mediaStream.getTracks().forEach(t => t.stop());
+    };
+    mediaRecorder.start();
+  }catch(e){
+    // Recording is a nice-to-have; recognition still works without it
+    mediaRecorder = null;
+  }
+
+  try{
+    recognition.start();
+    listening = true;
+    micBtn.classList.add('listening');
+    micDot.classList.add('pulse');
+    micLabel.textContent = "Listening… tap to stop";
+    statusEl.classList.remove('warn');
+    statusEl.textContent = "Listening — recite naturally, the tracker follows along.";
+  }catch(e){
+    statusEl.textContent = "Couldn't start microphone: " + e.message;
+  }
+}
+
+function stopListening(){
+  const wasListening = listening;
+  listening = false;
+  if(recognition){ try{ recognition.stop(); }catch(e){} }
+  if(mediaRecorder && mediaRecorder.state !== 'inactive'){ try{ mediaRecorder.stop(); }catch(e){} }
+  micBtn.classList.remove('listening');
+  micDot.classList.remove('pulse');
+  micLabel.textContent = "Start reciting";
+  if(wasListening && refWords.length){
+    document.getElementById('statMissed').textContent = Math.max(0, refWords.length - pointer);
+  }
+  if(confidences.length){
+    const avg = Math.round((confidences.reduce((a,b)=>a+b,0) / confidences.length) * 100);
+    transcriptConf.textContent = `(AR, ${avg}% confident)`;
+  } else if(finalizedText.trim()){
+    transcriptConf.textContent = `(AR)`;
+  }
+}
+
+micBtn.addEventListener('click', () => { if(listening) stopListening(); else startListening(); });
+document.getElementById('resetBtn').addEventListener('click', () => {
+  stopListening();
+  if(currentSurahNum && SURAH_TEXT_CACHE[currentSurahNum]){
+    buildSurah(currentSurahNum, SURAH_TEXT_CACHE[currentSurahNum]);
+  }
+});
+
+// ---- Playback controls ----
+playBtn.addEventListener('click', () => {
+  if(playbackAudio.paused){ playbackAudio.play(); playBtn.textContent = '⏸'; }
+  else { playbackAudio.pause(); playBtn.textContent = '▶'; }
+});
+function formatTime(t){
+  if(!isFinite(t)) return '0:00';
+  const m = Math.floor(t/60), s = Math.floor(t%60);
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+playbackAudio.addEventListener('timeupdate', () => {
+  const pct = playbackAudio.duration ? (playbackAudio.currentTime / playbackAudio.duration) * 100 : 0;
+  progressFill.style.width = pct + '%';
+  timeLabel.textContent = `${formatTime(playbackAudio.currentTime)} / ${formatTime(playbackAudio.duration)}`;
+});
+playbackAudio.addEventListener('loadedmetadata', () => {
+  timeLabel.textContent = `0:00 / ${formatTime(playbackAudio.duration)}`;
+});
+playbackAudio.addEventListener('ended', () => { playBtn.textContent = '▶'; });
+
+if(!getRecognitionCtor()){
+  statusEl.textContent = "Heads up: this browser doesn't support live speech recognition (try Chrome).";
+  statusEl.classList.add('warn');
+}
+</script>
+</body>
+</html>
