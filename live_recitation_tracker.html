@@ -106,6 +106,33 @@
     padding: 22px;
   }
 
+  .recite-card{ position: relative; }
+  .settings-wrap{ position: absolute; top: 18px; right: 18px; z-index: 5; }
+  .settings-btn{
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 50%; width: 34px; height: 34px;
+    display:flex; align-items:center; justify-content:center;
+    padding:0; font-size: 15px; color: var(--text-dim);
+  }
+  .settings-panel{
+    position: absolute; top: 40px; right: 0;
+    width: 250px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px 14px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+  }
+  .settings-panel.hidden{ display:none; }
+  .settings-title{
+    font-size: 10.5px; text-transform: uppercase; letter-spacing:.05em;
+    color: var(--text-dim); margin-bottom: 8px;
+  }
+  .settings-option{
+    display:flex; gap:9px; align-items:flex-start;
+    font-size: 13px; line-height:1.4;
+    padding: 7px 0; cursor:pointer;
+  }
+  .settings-option input{ margin-top: 3px; accent-color: var(--green); }
+
   .ayah-scroll{
     max-height: 320px;
     overflow-y: auto;
@@ -262,6 +289,21 @@
     </div>
 
     <div class="recite-card">
+      <div class="settings-wrap">
+        <button id="settingsBtn" class="settings-btn" title="Highlighting settings" type="button">⚙</button>
+        <div id="settingsPanel" class="settings-panel hidden">
+          <div class="settings-title">Highlighting</div>
+          <label class="settings-option">
+            <input type="radio" name="highlightMode" value="reveal" checked>
+            <span>Highlight each word after I recite it</span>
+          </label>
+          <label class="settings-option">
+            <input type="radio" name="highlightMode" value="preview">
+            <span>Preview the next word while reciting</span>
+          </label>
+        </div>
+      </div>
+
       <div class="ayah-scroll" id="ayahScroll"><div id="ayahContainer"></div></div>
 
       <div class="mic-row">
@@ -511,6 +553,24 @@ async function selectSurah(s, cardEl){
 searchInput.addEventListener('input', () => renderSurahGrid(searchInput.value));
 renderSurahGrid("");
 
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsPanel = document.getElementById('settingsPanel');
+settingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  settingsPanel.classList.toggle('hidden');
+});
+document.addEventListener('click', (e) => {
+  if(!settingsPanel.classList.contains('hidden') && !settingsPanel.contains(e.target) && e.target !== settingsBtn){
+    settingsPanel.classList.add('hidden');
+  }
+});
+document.querySelectorAll('input[name="highlightMode"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    highlightMode = e.target.value;
+    highlightCurrent();
+  });
+});
+
 // ---- Reference text building ----
 function buildSurah(num, ayat){
   stopListening();
@@ -576,12 +636,14 @@ function updateStats(){
   document.getElementById('statAyahs').textContent = ayahsHeard;
 }
 
+let highlightMode = 'reveal'; // 'reveal' = highlight only after recited, 'preview' = show upcoming word
+
 function highlightCurrent(){
   refWords.forEach((w, i) => {
     w.el.classList.remove('pending','current','correct','mistake');
     if(i < pointer){
       w.el.classList.add(w.el.dataset.status || 'correct');
-    } else if(i === pointer){
+    } else if(i === pointer && highlightMode === 'preview'){
       w.el.classList.add('current');
     } else {
       w.el.classList.add('pending');
