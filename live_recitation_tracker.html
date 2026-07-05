@@ -473,7 +473,8 @@ function levenshtein(a, b){
 function isFuzzyMatch(a, b){
   if(!a || !b) return false;
   const dist = levenshtein(a,b);
-  const threshold = Math.max(1, Math.floor(Math.max(a.length,b.length) * 0.34));
+  const longest = Math.max(a.length,b.length);
+  const threshold = longest <= 3 ? 0 : Math.max(1, Math.floor(longest * 0.34));
   return dist <= threshold;
 }
 
@@ -673,29 +674,68 @@ function scrollToCurrentWord(){
   container.scrollTo({ top: container.scrollTop + delta, behavior: 'smooth' });
 }
 
-function processNewWord(rawWord){
-  const norm = normalize(rawWord);
-  if(!norm) return;
-  const WINDOW = 6;
-  const windowEnd = Math.min(refWords.length, pointer + WINDOW);
-  let matchAt = -1;
-  for(let i = pointer; i < windowEnd; i++){
-    if(isFuzzyMatch(norm, refWords[i].norm)){ matchAt = i; break; }
+let consecutiveMisses = 0;
+const NEAR_WINDOW = 8;      // normal lookahead for an immediate, believable match
+const FAR_WINDOW = 40;      // wider lookahead, only trusted after repeated misses
+const RESYNC_THRESHOLD = 4; // misses in a row before we trust a big jump
+
+function findMatch(norm, from, to){
+  const end = Math.min(refWords.length, to);
+  for(let i = from; i < end; i++){
+    if(isFuzzyMatch(norm, refWords[i].norm)) return i;
   }
-  if(matchAt === -1) return;
+  return -1;
+}
+
+function applyMatch(matchAt){
   for(let i = pointer; i < matchAt; i++){
-    refWords[i].el.dataset.status = 'mistake';
-    stats.mistake++;
+    const skippedNorm = refWords[i].norm;
+    if(skippedNorm.length <= 3){
+      // Likely a disjointed letter (e.g. muqatta'at like الم) or other token speech
+      // recognition can't reliably catch when spelled out — don't call it "wrong".
+      refWords[i].el.dataset.status = 'unclear';
+    } else {
+      refWords[i].el.dataset.status = 'mistake';
+      stats.mistake++;
+    }
   }
   refWords[matchAt].el.dataset.status = 'correct';
   stats.correct++;
   pointer = matchAt + 1;
+  consecutiveMisses = 0;
   updateStats();
   highlightCurrent();
 
   if(pointer >= refWords.length){
     statusEl.textContent = "Surah complete. Press reset to go again, or pick another surah.";
     stopListening();
+  }
+}
+
+function processNewWord(rawWord){
+  const norm = normalize(rawWord);
+  if(!norm || pointer >= refWords.length) return;
+
+  // Short reference words need a stricter (near-exact) match — a 1-letter tolerance
+  // on a 2-3 letter word matches almost anything, which is how a stray recognized
+  // sound can wrongly "steal" a match and derail the pointer.
+  const nearMatch = findMatch(norm, pointer, pointer + NEAR_WINDOW);
+
+  if(nearMatch !== -1 && (nearMatch - pointer) <= 3){
+    applyMatch(nearMatch);
+    return;
+  }
+
+  // No close, believable match. Rather than immediately trusting a distant match
+  // (which is often coincidental — e.g. a repeated word elsewhere in the ayah),
+  // require a few consecutive misses before treating it as "we've fallen behind
+  // and need to catch up," then allow a wider resync search.
+  consecutiveMisses++;
+  if(consecutiveMisses >= RESYNC_THRESHOLD){
+    const farMatch = nearMatch !== -1 ? nearMatch : findMatch(norm, pointer + NEAR_WINDOW, pointer + FAR_WINDOW);
+    if(farMatch !== -1){
+      applyMatch(farMatch);
+    }
   }
 }
 
