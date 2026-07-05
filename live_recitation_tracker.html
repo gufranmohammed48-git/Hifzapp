@@ -179,6 +179,7 @@
   }
   .word.correct{ color: var(--green); }
   .word.blank{ color: transparent; }
+  .waqf{ color: rgba(232,237,244,0.22); font-size: 0.7em; }
   .word.mistake{
     color: var(--red);
     text-decoration: underline wavy rgba(229,72,77,0.6);
@@ -599,12 +600,21 @@ function buildSurah(num, ayat){
     const div = document.createElement('div');
     div.className = 'ayah';
     ayahText.split(/\s+/).forEach(w => {
+      const norm = normalize(w);
       const span = document.createElement('span');
-      span.className = 'word pending';
       span.textContent = w;
+      if(!norm){
+        // Not an actual recitable word (e.g. a Quranic pause/waqf mark like ۖ or ۚ) —
+        // show it for authenticity but don't track it, so it can't shift alignment indices.
+        span.className = 'waqf';
+        div.appendChild(span);
+        div.appendChild(document.createTextNode(' '));
+        return;
+      }
+      span.className = 'word pending';
       div.appendChild(span);
       div.appendChild(document.createTextNode(' '));
-      refWords.push({ text:w, norm: normalize(w), el: span });
+      refWords.push({ text:w, norm, el: span });
     });
     const numSpan = document.createElement('span');
     numSpan.className = 'ayah-num';
