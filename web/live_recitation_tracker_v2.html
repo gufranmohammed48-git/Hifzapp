@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Recitation Tracker v2.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0A1220;
+    --panel: #101A2C;
+    --card: #131F33;
+    --card-hover: #182640;
+    --border: rgba(255,255,255,0.08);
+    --text: #E8EDF4;
+    --text-dim: #8A96A8;
+    --green: #2ECC71;
+    --green-soft: rgba(46,204,113,0.14);
+    --red: #E74C3C;
+    --red-soft: rgba(231,76,60,0.14);
+    --yellow: #F1C40F;
+    --yellow-soft: rgba(241,196,15,0.14);
+    --blue: #3498DB;
+    --blue-soft: rgba(52,152,219,0.14);
+    --purple: #B57EDC;
+    --purple-soft: rgba(181,126,220,0.14);
+    --primary: #2ECC71;
+    --primary-soft: rgba(46,204,113,0.14);
+    --accent: #B57EDC;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+  .app{max-width:1200px;margin:0 auto;padding:24px}
+  /* VERSION BADGE — top right, easy to spot for cache-busting checks */
+  .version-badge{
+    position:fixed;top:14px;right:14px;z-index:1000;
+    background:var(--card);border:1px solid var(--border);border-radius:8px;
+    padding:6px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12px;font-weight:600;color:var(--accent);letter-spacing:.5px;
+    box-shadow:0 2px 8px rgba(0,0,0,.3);user-select:none;
+  }
+  .version-badge::before{content:"v";opacity:.6;margin-right:1px}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+  h1{margin:0;font-size:22px;font-weight:700}
+  h1 .arabic{font-family:'Amiri',serif;font-size:26px;margin-left:8px;color:var(--accent)}
+  .lede{margin:0 0 24px;color:var(--text-dim);font-size:14px;line-height:1.5;max-width:780px}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:18px}
+  .panel h2{margin:0 0 12px;font-size:14px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px}
+  .searchbar{display:flex;gap:10px;margin-bottom:14px}
+  .searchbar input{flex:1;background:var(--card);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:8px;font-size:14px;outline:none}
+  .searchbar input:focus{border-color:var(--green)}
+  .surah-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;max-height:420px;overflow-y:auto;padding:4px}
+  .surah-grid::-webkit-scrollbar{width:8px}
+  .surah-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .surah-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;cursor:pointer;transition:all .15s ease;text-align:left;font-family:inherit;color:var(--text)}
+  .surah-card:hover{background:var(--card-hover);border-color:rgba(46,204,113,.3);transform:translateY(-1px)}
+  .surah-card.active{border-color:var(--green);background:var(--green-soft)}
+  .sc-id{font-size:11px;color:var(--text-dim);font-weight:600;letter-spacing:.5px}
+  .sc-name-ar{font-family:'Amiri',serif;font-size:18px;margin-top:4px;color:var(--text)}
+  .sc-name-en{font-size:11px;color:var(--text-dim);margin-top:2px}
+  .sc-verses{font-size:10px;color:var(--text-dim);margin-top:2px}
+  #ayahContainer{font-family:'Amiri',serif;font-size:28px;line-height:2.2;direction:rtl;text-align:right;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;min-height:120px}
+  #ayahContainer .verse{margin-bottom:16px}
+  #ayahContainer .verse:last-child{margin-bottom:0}
+  #ayahContainer .verse-label{display:inline-block;background:var(--primary-soft);color:var(--primary);font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle}
+  .word{display:inline-block;padding:4px 6px;margin:2px 3px;border-radius:6px;cursor:pointer;transition:all .15s ease;border:2px solid transparent;position:relative}
+  .word[data-status="correct"]{background:var(--green-soft);color:var(--green);border-color:rgba(46,204,113,.3)}
+  .word[data-status="correct"].now{box-shadow:0 0 0 3px rgba(46,204,113,.4);transform:scale(1.08)}
+  .word[data-status="mistake"]{background:var(--red-soft);color:var(--red);border-color:rgba(231,76,60,.3);text-decoration:line wavy var(--red)}
+  .word[data-status="unclear"]{background:var(--yellow-soft);color:var(--yellow);border-color:rgba(241,196,15,.3)}
+  .word.now{box-shadow:0 0 0 3px var(--primary);transform:scale(1.05)}
+  .word.tajweed-tafkheem{border-bottom:3px solid var(--red)}
+  .word.tajweed-qalqala{border-bottom:3px solid var(--yellow)}
+  .word.tajweed-madd{border-bottom:3px solid var(--blue)}
+  .word.tajweed-idgham{border-bottom:3px solid var(--purple)}
+  .word.tajweed-ikhfaa{border-bottom:3px solid var(--purple)}
+  .word.tajweed-iqlab{border-bottom:3px solid var(--purple)}
+  .word.tajweed-ghunna{border-bottom:3px dotted var(--purple)}
+  .word .phoneme-tooltip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--text);font-family:'Inter',sans-serif;line-height:1.5;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;z-index:100;min-width:200px}
+  .word:hover .phoneme-tooltip{opacity:1}
+  .word .phoneme-tooltip .ipa{font-family:ui-monospace,monospace;color:var(--accent);font-size:13px}
+  .word .phoneme-tooltip .rules{margin-top:6px;color:var(--text-dim)}
+  .mic-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .mic-btn{display:flex;align-items:center;gap:10px;background:var(--primary);color:#0a1f12;border:none;padding:12px 22px;border-radius:30px;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;transition:all .15s ease}
+  .mic-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(46,204,113,.35)}
+  .mic-btn.listening{background:var(--red);color:#fff}
+  .mic-btn.listening:hover{box-shadow:0 6px 20px rgba(231,76,60,.35)}
+  .mic-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .mic-dot{width:10px;height:10px;border-radius:50%;background:#0a1f12}
+  .mic-btn.listening .mic-dot{background:#fff;animation:pulse 1.2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.4);opacity:.5}}
+  .status{color:var(--text-dim);font-size:13px;margin-left:8px}
+  .status.warn{color:var(--yellow)}
+  .playback-row{display:none;align-items:center;gap:12px;margin-top:12px}
+  .playback-row:not(.hidden){display:flex}
+  .play-btn{background:var(--card);border:1px solid var(--border);color:var(--text);padding:8px 14px;border-radius:8px;font-family:inherit;cursor:pointer;font-size:13px}
+  .play-btn:hover{border-color:var(--green)}
+  .progress-wrap{flex:1;height:8px;background:var(--card);border-radius:4px;overflow:hidden;border:1px solid var(--border)}
+  .progress-fill{height:100%;background:var(--green);width:0%;transition:width .1s linear}
+  .time-label{font-family:ui-monospace,monospace;font-size:12px;color:var(--text-dim);min-width:90px}
+  .stats{display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+  .stat{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 16px}
+  .stat-label{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px}
+  .stat-val{font-size:24px;font-weight:700;margin-top:2px}
+  .stat-val.green{color:var(--green)}
+  .stat-val.red{color:var(--red)}
+  .stat-val.yellow{color:var(--yellow)}
+  .transcript-box{margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:13px;line-height:1.6;max-height:140px;overflow-y:auto}
+  .transcript-box .label{color:var(--text-dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;display:block}
+  .transcript-box .text{font-family:'Amiri',serif;font-size:18px;direction:rtl;text-align:right}
+  .transcript-box .conf{color:var(--text-dim);font-size:11px;margin-top:6px}
+  /* DEBUG PANEL — at the bottom, lists all marked-as-error words with context */
+  .debug-panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px;margin-top:18px}
+  .debug-panel h2{margin:0 0 6px;font-size:14px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px}
+  .debug-panel .hint{font-size:12px;color:var(--text-dim);margin-bottom:14px}
+  .debug-list{display:flex;flex-direction:column;gap:10px;max-height:520px;overflow-y:auto;padding-right:6px}
+  .debug-list::-webkit-scrollbar{width:8px}
+  .debug-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .debug-empty{color:var(--text-dim);font-size:13px;font-style:italic;text-align:center;padding:30px 0}
+  .debug-row{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--red);border-radius:8px;padding:12px 14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;font-size:12px}
+  .debug-row.unclear{border-left-color:var(--yellow)}
+  .debug-row .col-label{color:var(--text-dim);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+  .debug-row .arabic{font-family:'Amiri',serif;font-size:18px;direction:rtl}
+  .debug-row .norm{font-family:ui-monospace,monospace;font-size:11px;color:var(--text-dim);margin-top:2px;direction:ltr;text-align:left}
+  .debug-row .phoneme{font-family:ui-monospace,monospace;font-size:11px;color:var(--accent);margin-top:4px;direction:ltr;text-align:left}
+  .debug-row .reason{font-size:11px;color:var(--text-dim);margin-top:4px;line-height:1.4}
+  .debug-row .reason b{color:var(--red)}
+  .debug-row .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:10px;color:var(--text-dim)}
+  .debug-row .meta .chip{background:var(--bg);padding:2px 6px;border-radius:3px;font-family:ui-monospace,monospace}
+  .clear-btn{margin-top:10px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer}
+  .clear-btn:hover{border-color:var(--red);color:var(--red)}
+</style>
+</head>
+<body>
+
+<!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.1</div>
+
+<div class="app">
+
+<header>
+  <h1>Live Recitation Tracker <span class="arabic">مُتَتَبِّع التلاوة</span></h1>
+</header>
+
+<p class="lede">
+  Pick a surah, hit Start, then recite naturally. The tracker follows along word-by-word and
+  marks each as <b style="color:var(--green)">correct</b> / <b style="color:var(--red)">wrong</b> /
+  <b style="color:var(--yellow)">unclear</b>. Tap any word to see its phoneme breakdown and
+  Tajweed rules. Audio is processed entirely in your browser via Chrome's built-in speech
+  recognition — no backend, no data leaves your device.
+</p>
+
+<section class="panel">
+  <h2>① Choose a Surah</h2>
+  <div class="searchbar">
+    <input type="text" id="searchInput" placeholder="Search by number, transliteration, or Arabic name…" autocomplete="off">
+    <button class="mic-btn" id="resetBtn" style="background:var(--card);color:var(--text);border:1px solid var(--border);font-size:13px;padding:8px 14px">Reset</button>
+  </div>
+  <div class="surah-grid" id="surahGrid"></div>
+</section>
+
+<section class="panel hidden" id="step2">
+  <h2 id="step2Title">② Recite</h2>
+
+  <div class="stats" id="stats">
+    <div class="stat"><div class="stat-label">Correct</div><div class="stat-val green" id="statCorrect">0</div></div>
+    <div class="stat"><div class="stat-label">Mistakes</div><div class="stat-val red" id="statMistake">0</div></div>
+    <div class="stat"><div class="stat-label">Unclear</div><div class="stat-val yellow" id="statUnclear">0</div></div>
+    <div class="stat"><div class="stat-label">Pointer</div><div class="stat-val" id="statPointer">0 / 0</div></div>
+  </div>
+
+  <div class="mic-row">
+    <button class="mic-btn" id="micBtn">
+      <span class="mic-dot"></span>
+      <span id="micLabel">Start reciting</span>
+    </button>
+    <span class="status" id="status">Pick a surah above first.</span>
+  </div>
+
+  <div class="playback-row" id="playbackRow">
+    <button class="play-btn" id="playBtn">▶</button>
+    <div class="progress-wrap"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="time-label" id="timeLabel">0:00 / 0:00</div>
+    <audio id="playbackAudio" preload="auto"></audio>
+  </div>
+
+  <div id="ayahContainer"></div>
+
+  <div class="transcript-box hidden" id="transcriptBox">
+    <span class="label">Live transcript (from Chrome Speech Recognition)</span>
+    <div class="text" id="transcriptText"></div>
+    <div class="conf" id="transcriptConf"></div>
+  </div>
+</section>
+
+<section class="debug-panel" id="debugPanel">
+  <h2>③ Debug — words marked as errors</h2>
+  <p class="hint">Each row shows a word that was marked <b style="color:var(--red)">wrong</b> or
+    <b style="color:var(--yellow)">unclear</b>: what the script <i>expected</i> (the Quranic
+    text), what was <i>recited</i> (Chrome's transcription), and <b>why</b> it didn't match.</p>
+  <div class="debug-list" id="debugList">
+    <div class="debug-empty">No errors yet. Start reciting and any mismatches will appear here.</div>
+  </div>
+  <button class="clear-btn" id="clearDebugBtn">Clear debug log</button>
+</section>
+
+</div>
+
+<script>
+// =========================================================================
+// SURAH METADATA — name + transliteration + verse count for each of 114.
+// =========================================================================
+const SURAH_META = [
+  {num:1,name:"الفاتحة",translit:"Al-Fatihah",meaning:"The Opening",verses:7},
+  {num:2,name:"البقرة",translit:"Al-Baqarah",meaning:"The Cow",verses:286},
+  {num:3,name:"آل عمران",translit:"Aal-i-Imraan",meaning:"The Family of Imraan",verses:200},
+  {num:4,name:"النساء",translit:"An-Nisaa",meaning:"The Women",verses:176},
+  {num:5,name:"المائدة",translit:"Al-Maaida",meaning:"The Table",verses:120},
+  {num:6,name:"الأنعام",translit:"Al-An'aam",meaning:"The Cattle",verses:165},
+  {num:7,name:"الأعراف",translit:"Al-A'raaf",meaning:"The Heights",verses:206},
+  {num:8,name:"الأنفال",translit:"Al-Anfaal",meaning:"The Spoils of War",verses:75},
+  {num:9,name:"التوبة",translit:"At-Tawbah",meaning:"The Repentance",verses:129},
+  {num:10,name:"يونس",translit:"Yunus",meaning:"Jonas",verses:109},
+  {num:11,name:"هود",translit:"Hud",meaning:"Hud",verses:123},
+  {num:12,name:"يوسف",translit:"Yusuf",meaning:"Joseph",verses:111},
+  {num:13,name:"الرعد",translit:"Ar-Ra'd",meaning:"The Thunder",verses:43},
+  {num:14,name:"إبراهيم",translit:"Ibrahim",meaning:"Abraham",verses:52},
+  {num:15,name:"الحجر",translit:"Al-Hijr",meaning:"The Rocky Tract",verses:99},
+  {num:16,name:"النحل",translit:"An-Nahl",meaning:"The Bee",verses:128},
+  {num:17,name:"الإسراء",translit:"Al-Israa",meaning:"The Night Journey",verses:111},
+  {num:18,name:"الكهف",translit:"Al-Kahf",meaning:"The Cave",verses:110},
+  {num:19,name:"مريم",translit:"Maryam",meaning:"Mary",verses:98},
+  {num:20,name:"طه",translit:"Taa-Haa",meaning:"Taa-Haa",verses:135},
+  {num:21,name:"الأنبياء",translit:"Al-Anbiyaa",meaning:"The Prophets",verses:112},
+  {num:22,name:"الحج",translit:"Al-Hajj",meaning:"The Pilgrimage",verses:78},
+  {num:23,name:"المؤمنون",translit:"Al-Mu'minoon",meaning:"The Believers",verses:118},
+  {num:24,name:"النور",translit:"An-Noor",meaning:"The Light",verses:64},
+  {num:25,name:"الفرقان",translit:"Al-Furqaan",meaning:"The Criterion",verses:77},
+  {num:26,name:"الشعراء",translit:"Ash-Shu'araa",meaning:"The Poets",verses:227},
+  {num:27,name:"النمل",translit:"An-Naml",meaning:"The Ant",verses:93},
+  {num:28,name:"القصص",translit:"Al-Qasas",meaning:"The Stories",verses:88},
+  {num:29,name:"العنكبوت",translit:"Al-Ankaboot",meaning:"The Spider",verses:69},
+  {num:30,name:"الروم",translit:"Ar-Room",meaning:"The Romans",verses:60},
+  {num:31,name:"لقمان",translit:"Luqman",meaning:"Luqman",verses:34},
+  {num:32,name:"السجدة",translit:"As-Sajdah",meaning:"The Prostration",verses:30},
+  {num:33,name:"الأحزاب",translit:"Al-Ahzaab",meaning:"The Clans",verses:73},
+  {num:34,name:"سبإ",translit:"Saba",meaning:"Sheba",verses:54},
+  {num:35,name:"فاطر",translit:"Faatir",meaning:"The Originator",verses:45},
+  {num:36,name:"يس",translit:"Yaseen",meaning:"Yaseen",verses:83},
+  {num:37,name:"الصافات",translit:"As-Saaffaat",meaning:"Those Ranged in Ranks",verses:182},
+  {num:38,name:"ص",translit:"Saad",meaning:"The Letter Saad",verses:88},
+  {num:39,name:"الزمر",translit:"Az-Zumar",meaning:"The Groups",verses:75},
+  {num:40,name:"غافر",translit:"Ghafir",meaning:"The Forgiver",verses:85},
+  {num:41,name:"فصلت",translit:"Fussilat",meaning:"Explained in Detail",verses:54},
+  {num:42,name:"الشورى",translit:"Ash-Shura",meaning:"The Consultation",verses:53},
+  {num:43,name:"الزخرف",translit:"Az-Zukhruf",meaning:"The Gold Adornments",verses:89},
+  {num:44,name:"الدخان",translit:"Ad-Dukhaan",meaning:"The Smoke",verses:59},
+  {num:45,name:"الجاثية",translit:"Al-Jaathiyah",meaning:"The Kneeling",verses:37},
+  {num:46,name:"الأحقاف",translit:"Al-Ahqaf",meaning:"The Curved Sand Tracts",verses:35},
+  {num:47,name:"محمد",translit:"Muhammad",meaning:"Muhammad",verses:38},
+  {num:48,name:"الفتح",translit:"Al-Fath",meaning:"The Victory",verses:29},
+  {num:49,name:"الحجرات",translit:"Al-Hujuraat",meaning:"The Rooms",verses:18},
+  {num:50,name:"ق",translit:"Qaaf",meaning:"The Letter Qaaf",verses:45},
+  {num:51,name:"الذاريات",translit:"Adh-Dhaariyaat",meaning:"The Winnowing Winds",verses:60},
+  {num:52,name:"الطور",translit:"At-Tur",meaning:"The Mount",verses:49},
+  {num:53,name:"النجم",translit:"An-Najm",meaning:"The Star",verses:62},
+  {num:54,name:"القمر",translit:"Al-Qamar",meaning:"The Moon",verses:55},
+  {num:55,name:"الرحمن",translit:"Ar-Rahmaan",meaning:"The Most Gracious",verses:78},
+  {num:56,name:"الواقعة",translit:"Al-Waaqia",meaning:"The Inevitable",verses:96},
+  {num:57,name:"الحديد",translit:"Al-Hadeed",meaning:"The Iron",verses:29},
+  {num:58,name:"المجادلة",translit:"Al-Mujaadila",meaning:"The Woman Who Disputes",verses:22},
+  {num:59,name:"الحشر",translit:"Al-Hashr",meaning:"The Gathering",verses:24},
+  {num:60,name:"الممتحنة",translit:"Al-Mumtahana",meaning:"The Woman to be Examined",verses:13},
+  {num:61,name:"الصف",translit:"As-Saff",meaning:"The Ranks",verses:14},
+  {num:62,name:"الجمعة",translit:"Al-Jumu'ah",meaning:"The Friday",verses:11},
+  {num:63,name:"المنافقون",translit:"Al-Munaafiqoon",meaning:"The Hypocrites",verses:11},
+  {num:64,name:"التغابن",translit:"At-Taghaabun",meaning:"Mutual Disillusion",verses:18},
+  {num:65,name:"الطلاق",translit:"At-Talaaq",meaning:"Divorce",verses:12},
+  {num:66,name:"التحريم",translit:"At-Tahreem",meaning:"The Prohibition",verses:12},
+  {num:67,name:"الملك",translit:"Al-Mulk",meaning:"The Kingdom",verses:30},
+  {num:68,name:"القلم",translit:"Al-Qalam",meaning:"The Pen",verses:52},
+  {num:69,name:"الحاقة",translit:"Al-Haaqqa",meaning:"The Reality",verses:52},
+  {num:70,name:"المعارج",translit:"Al-Ma'aarij",meaning:"The Ways of Ascent",verses:44},
+  {num:71,name:"نوح",translit:"Nooh",meaning:"Noah",verses:28},
+  {num:72,name:"الجن",translit:"Al-Jinn",meaning:"The Jinn",verses:28},
+  {num:73,name:"المزمل",translit:"Al-Muzzammil",meaning:"The Enshrouded One",verses:20},
+  {num:74,name:"المدثر",translit:"Al-Muddaththir",meaning:"The Cloaked One",verses:56},
+  {num:75,name:"القيامة",translit:"Al-Qiyaamah",meaning:"The Resurrection",verses:40},
+  {num:76,name:"الإنسان",translit:"Al-Insaan",meaning:"Man",verses:31},
+  {num:77,name:"المرسلات",translit:"Al-Mursalaat",meaning:"The Emissaries",verses:50},
+  {num:78,name:"النبأ",translit:"An-Naba",meaning:"The Announcement",verses:40},
+  {num:79,name:"النازعات",translit:"An-Naazi'aat",meaning:"Those Who Pull Out",verses:46},
+  {num:80,name:"عبس",translit:"Abasa",meaning:"He Frowned",verses:42},
+  {num:81,name:"التكوير",translit:"At-Takweer",meaning:"The Folding Up",verses:29},
+  {num:82,name:"الإنفطار",translit:"Al-Infitaar",meaning:"The Cleaving",verses:19},
+  {num:83,name:"المطففين",translit:"Al-Mutaffifeen",meaning:"The Defrauders",verses:36},
+  {num:84,name:"الإنشقاق",translit:"Al-Inshiqaaq",meaning:"The Splitting Open",verses:25},
+  {num:85,name:"البروج",translit:"Al-Burooj",meaning:"The Constellations",verses:22},
+  {num:86,name:"الطارق",translit:"At-Taariq",meaning:"The Night-Comer",verses:17},
+  {num:87,name:"الأعلى",translit:"Al-A'laa",meaning:"The Most High",verses:19},
+  {num:88,name:"الغاشية",translit:"Al-Ghaashiya",meaning:"The Overwhelming",verses:26},
+  {num:89,name:"الفجر",translit:"Al-Fajr",meaning:"The Dawn",verses:30},
+  {num:90,name:"البلد",translit:"Al-Balad",meaning:"The City",verses:20},
+  {num:91,name:"الشمس",translit:"Ash-Shams",meaning:"The Sun",verses:15},
+  {num:92,name:"الليل",translit:"Al-Lail",meaning:"The Night",verses:21},
+  {num:93,name:"الضحى",translit:"Ad-Dhuhaa",meaning:"The Forenoon",verses:11},
+  {num:94,name:"الشرح",translit:"Ash-Sharh",meaning:"The Opening Forth",verses:8},
+  {num:95,name:"التين",translit:"At-Teen",meaning:"The Fig",verses:8},
+  {num:96,name:"العلق",translit:"Al-Alaq",meaning:"The Clot",verses:19},
+  {num:97,name:"القدر",translit:"Al-Qadr",meaning:"The Power",verses:5},
+  {num:98,name:"البينة",translit:"Al-Bayyinah",meaning:"The Clear Proof",verses:8},
+  {num:99,name:"الزلزلة",translit:"Az-Zalzalah",meaning:"The Earthquake",verses:8},
+  {num:100,name:"العاديات",translit:"Al-Aadiyaat",meaning:"The Coursers",verses:11},
+  {num:101,name:"القارعة",translit:"Al-Qaari'ah",meaning:"The Striking Hour",verses:11},
+  {num:102,name:"التكاثر",translit:"At-Takaathur",meaning:"The Piling Up",verses:8},
+  {num:103,name:"العصر",translit:"Al-Asr",meaning:"The Time",verses:3},
+  {num:104,name:"الهمزة",translit:"Al-Humazah",meaning:"The Slanderer",verses:9},
+  {num:105,name:"الفيل",translit:"Al-Feel",meaning:"The Elephant",verses:5},
+  {num:106,name:"قريش",translit:"Quraish",meaning:"Quraish",verses:4},
+  {num:107,name:"الماعون",translit:"Al-Maa'un",meaning:"The Small Kindness",verses:7},
+  {num:108,name:"الكوثر",translit:"Al-Kawthar",meaning:"The Abundance",verses:3},
+  {num:109,name:"الكافرون",translit:"Al-Kaafiroon",meaning:"The Disbelievers",verses:6},
+  {num:110,name:"النصر",translit:"An-Nasr",meaning:"The Help",verses:3},
+  {num:111,name:"المسد",translit:"Al-Masad",meaning:"The Palm Fibre",verses:5},
+  {num:112,name:"الإخلاص",translit:"Al-Ikhlaas",meaning:"The Sincerity",verses:4},
+  {num:113,name:"الفلق",translit:"Al-Falaq",meaning:"The Daybreak",verses:5},
+  {num:114,name:"الناس",translit:"An-Naas",meaning:"Mankind",verses:6},
+];
+
+// =========================================================================
+// CONSTANTS — matching thresholds, look-ahead windows.
+// =========================================================================
+const NEAR_WINDOW       = 8;     // normal lookahead
+const FAR_WINDOW        = 40;    // wider lookahead for resync
+const RESYNC_THRESHOLD  = 4;     // misses in a row before we trust a big jump
+const LEVENSHTEIN_RATIO = 0.30;  // ≤30% edit distance is a match (was absolute 0.34)
+// Phoneme-similarity threshold (used as fallback when text is borderline)
+const PHONEME_LEVENSHTEIN_RATIO = 0.30;
+
+// =========================================================================
+// STATE
+// =========================================================================
+let refWords       = [];     // [{text, norm, phoneme, el, surah, ayah, position}]
+let ayahEndIndex   = [];     // [endIdx_in_refWords_of_ayah_1, endIdx_of_ayah_2, ...]
+let pointer        = 0;
+let consecutiveMisses = 0;
+let stats          = {correct:0, mistake:0, unclear:0};
+let debugLog       = [];     // every mistake/unclear pushed here for the debug panel
+let recognition    = null;
+let listening      = false;
+let committedWordCount = 0;
+let finalizedText  = "";
+let confidences    = [];
+let mediaStream    = null;
+let mediaRecorder  = null;
+let audioChunks    = [];
+let currentAudioURL = null;
+let activeSurah    = null;
+let phonemeData    = null;   // will be loaded asynchronously on startup
+
+// =========================================================================
+// PHONEME DATA LOADER — pulls SURAH_PHONEMES from the sibling phonemes-data.js
+// =========================================================================
+async function loadPhonemeData(){
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'phonemes-data.js';
+    s.onload = () => resolve(window.SURAH_PHONEMES || null);
+    s.onerror = () => reject(new Error('phonemes-data.js failed to load'));
+    document.head.appendChild(s);
+  });
+}
+
+// =========================================================================
+// NORMALIZATION — stricter than Claude's original.
+// Strips ALL Arabic combining marks (more thorough UCD coverage),
+// unifies alef/ya/taa-marbuta variants. NFKC normalization first.
+// =========================================================================
+function normalize(word){
+  if(!word) return '';
+  return word
+    .normalize('NFKC')
+    // strip every Arabic combining mark (Mn) plus all small high marks,
+    // tatweel, madda, superscript alef, etc.
+    .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g, '')
+    // unify alef variants (incl. alef wasla ٱ)
+    .replace(/[إأآاٱ]/g, 'ا')
+    // ya / alef maqsura / farsi ya → unified ya
+    .replace(/[يىی]/g, 'ي')
+    // farsi/persian variants → arabic
+    .replace(/[كک]/g, 'ك')
+    .replace(/[هھ]/g, 'ه')
+    // taa marbuta → ha (as in classical Arabic phonology)
+    .replace(/ة/g, 'ه')
+    // strip any non-Arabic (Latin digits, punctuation, etc.)
+    .replace(/[^\u0600-\u06FF]/g, '')
+    .trim();
+}
+
+// =========================================================================
+// PHONETIC NORMALIZER — quick JS approximation of the Qur'anic Phonemizer.
+// The full phonemizer is Python; this is a good-enough fallback so the
+// browser-only path can still do phonetic matching. Used as a secondary
+// check when text-Levenshtein is borderline.
+// =========================================================================
+const AR_TO_IPA = {
+  'ا':'aː','إ':'ʔ','أ':'ʔ','آ':'aː','ٱ':'ʔ','ب':'b','ت':'t','ث':'θ',
+  'ج':'ʒ','ح':'ħ','خ':'x','د':'d','ذ':'ð','ر':'r','ز':'z','س':'s',
+  'ش':'ʃ','ص':'sˤ','ض':'dˤ','ط':'tˤ','ظ':'ðˤ','ع':'ʕ','غ':'ɣ','ف':'f',
+  'ق':'q','ك':'k','ل':'l','م':'m','ن':'n','ه':'h','و':'w','ي':'j',
+  'ى':'aː','ة':'h','ء':'ʔ','ؤ':'ʔ','ئ':'ʔ'
+};
+function phonemizeArabic(text){
+  if(!text) return '';
+  // strip combining marks + tatweel
+  const cleaned = text.normalize('NFKC')
+    .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g, '');
+  let out = '';
+  for(const ch of cleaned){
+    if(AR_TO_IPA[ch]) out += AR_TO_IPA[ch];
+    else if(/\s/.test(ch)) out += ' ';
+  }
+  // collapse doubled consonants (basic gemination → geminate)
+  out = out.replace(/(.)\1/g, '$1$1');
+  return out;
+}
+
+// =========================================================================
+// LEVENSHTEIN — classic DP, distance is what we care about.
+// =========================================================================
+function levenshtein(a, b){
+  const m = a.length, n = b.length;
+  if(!m) return n; if(!n) return m;
+  const dp = Array.from({length:m+1}, () => new Array(n+1).fill(0));
+  for(let i=0;i<=m;i++) dp[i][0] = i;
+  for(let j=0;j<=n;j++) dp[0][j] = j;
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function levRatio(a, b){
+  if(!a || !b) return 0;
+  return 1 - (levenshtein(a, b) / Math.max(a.length, b.length));
+}
+
+// =========================================================================
+// MATCHING — text first (fast, exact-match shortcut), phoneme fallback.
+// isFuzzyMatch returns {matched: bool, kind: 'text'|'phoneme'|'substring'|'none',
+//                        distance, ratio, normalized, phonemes}
+// =========================================================================
+function isFuzzyMatch(heardNorm, expectedNorm, expectedPhonemes){
+  if(!heardNorm || !expectedNorm) return {matched:false, kind:'none'};
+
+  // 1) exact match
+  if(heardNorm === expectedNorm) return {matched:true, kind:'text', ratio:1};
+
+  // 2) substring — Chrome often merges "ال" + next word, or drops the prefix الـ
+  //    if heard contains expected, or vice versa, count it as a match.
+  const minLen = Math.min(heardNorm.length, expectedNorm.length);
+  const maxLen = Math.max(heardNorm.length, expectedNorm.length);
+  if(minLen >= 3){
+    if(heardNorm.includes(expectedNorm) || expectedNorm.includes(heardNorm)){
+      return {matched:true, kind:'substring', ratio: minLen/maxLen};
+    }
+  }
+
+  // 3) text Levenshtein ratio
+  const r = levRatio(heardNorm, expectedNorm);
+  if(r >= (1 - LEVENSHTEIN_RATIO)){
+    return {matched:true, kind:'text', ratio:r};
+  }
+
+  // 4) phonetic fallback — only if text was borderline (within 2x of threshold)
+  if(expectedPhonemes && r >= (1 - 2*LEVENSHTEIN_RATIO)){
+    const heardPh = phonemizeArabic(heardNorm);
+    if(heardPh && heardPh.length >= 3 && expectedPhonemes.length >= 3){
+      const phRatio = levRatio(heardPh, expectedPhonemes);
+      if(phRatio >= (1 - PHONEME_LEVENSHTEIN_RATIO)){
+        return {matched:true, kind:'phoneme', ratio:phRatio, heardPh, expectedPh};
+      }
+      // Record what we tried so the debug panel can show the phoneme mismatch.
+      return {matched:false, kind:'phoneme', ratio:phRatio, heardPh, expectedPh, textRatio:r};
+    }
+  }
+
+  return {matched:false, kind:'none', ratio:r};
+}
+
+// =========================================================================
+// MATCH SEARCH — find the first fuzzy match in [from, to).
+// =========================================================================
+function findMatch(heardNorm, from, to){
+  const end = Math.min(refWords.length, to);
+  for(let i = from; i < end; i++){
+    const m = isFuzzyMatch(heardNorm, refWords[i].norm, refWords[i].phoneme);
+    if(m.matched) return {idx:i, match:m};
+  }
+  return {idx:-1, match:{matched:false, kind:'none'}};
+}
+
+// =========================================================================
+// APPLY MATCH — mark all in-between as mistake/unclear, the matched one
+// as correct, advance pointer.
+// =========================================================================
+function applyMatch(matchAt, matchInfo){
+  for(let i = pointer; i < matchAt; i++){
+    const w = refWords[i];
+    const status = w.norm.length <= 3 ? 'unclear' : 'mistake';
+    w.el.dataset.status = status;
+    // record every mistake/unclear for the debug panel
+    if(status === 'mistake'){
+      stats.mistake++;
+      debugLog.push({
+        kind:'mistake',
+        heard:'', heardNorm:'',
+        expected:w.text, expectedNorm:w.norm,
+        expectedPhoneme:w.phoneme,
+        surah:activeSurah, ayah:w.ayah, position:w.position,
+        reason:`Skipped — pointer was at ${pointer}, jumped to ${matchAt} ` +
+               `(match was ${matchInfo.kind}, ratio=${(matchInfo.ratio||0).toFixed(2)})`,
+        ts: Date.now(),
+      });
+    }else{
+      stats.unclear++;
+      debugLog.push({
+        kind:'unclear',
+        heard:'', heardNorm:'',
+        expected:w.text, expectedNorm:w.norm,
+        expectedPhoneme:w.phoneme,
+        surah:activeSurah, ayah:w.ayah, position:w.position,
+        reason:`Skipped short token (≤3 chars), can't reliably verify`,
+        ts: Date.now(),
+      });
+    }
+  }
+  refWords[matchAt].el.dataset.status = 'correct';
+  stats.correct++;
+  pointer = matchAt + 1;
+  consecutiveMisses = 0;
+  updateStats();
+  highlightCurrent();
+  renderDebugPanel();
+  if(pointer >= refWords.length){
+    statusEl.textContent = 'Surah complete. Press reset to go again, or pick another surah.';
+    stopListening();
+  }
+}
+
+// =========================================================================
+// PROCESS NEW WORD — the core recognition loop.
+// On every Chrome result event, the latest fullText is split by whitespace
+// and any new words get processed here.
+// =========================================================================
+function processNewWord(rawWord){
+  const norm = normalize(rawWord);
+  if(!norm){
+    debugLog.push({
+      kind:'empty',
+      heard:rawWord, heardNorm:'',
+      expected:'', expectedNorm:'',
+      expectedPhoneme:'',
+      reason:'Empty after normalization (likely silence / noise artifact)',
+      ts: Date.now(),
+    });
+    return;
+  }
+  if(pointer >= refWords.length){
+    debugLog.push({
+      kind:'overflow',
+      heard:rawWord, heardNorm:norm,
+      expected:'(surah complete)', expectedNorm:'',
+      expectedPhoneme:'',
+      reason:'Surah already complete — extra words ignored',
+      ts: Date.now(),
+    });
+    return;
+  }
+
+  // 1) near-window search (normal lookahead)
+  const near = findMatch(norm, pointer, pointer + NEAR_WINDOW);
+  if(near.idx !== -1 && (near.idx - pointer) <= 3){
+    applyMatch(near.idx, near.match);
+    return;
+  }
+
+  // 2) far-window search (only after RESYNC_THRESHOLD misses in a row)
+  consecutiveMisses++;
+  if(consecutiveMisses >= RESYNC_THRESHOLD){
+    const far = findMatch(norm, pointer + NEAR_WINDOW, pointer + FAR_WINDOW);
+    if(far.idx !== -1){
+      applyMatch(far.idx, far.match);
+      return;
+    }
+  }
+
+  // 3) no match → log to debug panel so the user can see what happened
+  const expected = refWords[pointer];
+  const expectedPhoneme = expected.phoneme;
+  const heardPh = phonemizeArabic(norm);
+  // Try the phoneme fallback manually so we can report what happened even if it failed.
+  let phRatio = null;
+  if(expectedPhoneme && heardPh && heardPh.length >= 3 && expectedPhoneme.length >= 3){
+    phRatio = levRatio(heardPh, expectedPhoneme);
+  }
+  const textRatio = levRatio(norm, expected.norm);
+  debugLog.push({
+    kind:'miss',
+    heard:rawWord, heardNorm:norm, heardPhoneme:heardPh,
+    expected:expected.text, expectedNorm:expected.norm, expectedPhoneme,
+    textRatio, phRatio,
+    surah:activeSurah, ayah:expected.ayah, position:expected.position,
+    reason:phRatio != null
+      ? `Heard "${norm}" doesn't match expected "${expected.norm}". ` +
+        `Text ratio=${textRatio.toFixed(2)}, phoneme ratio=${phRatio.toFixed(2)} ` +
+        `(need ≥${(1-PHONEME_LEVENSHTEIN_RATIO).toFixed(2)}). ` +
+        `Miss #${consecutiveMisses}/${RESYNC_THRESHOLD} before resync.`
+      : `Heard "${norm}" doesn't match expected "${expected.norm}". ` +
+        `Text ratio=${textRatio.toFixed(2)} (need ≥${(1-LEVENSHTEIN_RATIO).toFixed(2)}). ` +
+        `Miss #${consecutiveMisses}/${RESYNC_THRESHOLD} before resync.`,
+    ts: Date.now(),
+  });
+  renderDebugPanel();
+}
+
+// =========================================================================
+// DEBUG PANEL — render every mistake/unclear with full context.
+// =========================================================================
+function renderDebugPanel(){
+  const list = document.getElementById('debugList');
+  if(!debugLog.length){
+    list.innerHTML = '<div class="debug-empty">No errors yet. Start reciting and any mismatches will appear here.</div>';
+    return;
+  }
+  // newest first
+  const rows = debugLog.slice().reverse().map(e => {
+    const cls = e.kind === 'unclear' ? 'debug-row unclear' : 'debug-row';
+    const meta = [
+      e.surah && e.ayah && `surah ${e.surah}:${e.ayah}:${e.position||'?'}`,
+      e.textRatio != null && `text=${e.textRatio.toFixed(2)}`,
+      e.phRatio != null && `phon=${e.phRatio.toFixed(2)}`,
+    ].filter(Boolean).map(s => `<span class="chip">${s}</span>`).join('');
+    return `
+      <div class="${cls}">
+        <div>
+          <div class="col-label">Expected (canonical)</div>
+          <div class="arabic">${e.expected||'—'}</div>
+          <div class="norm">${e.expectedNorm||'—'}</div>
+          <div class="phoneme">IPA: ${e.expectedPhoneme||'—'}</div>
+        </div>
+        <div>
+          <div class="col-label">Recited (Chrome heard)</div>
+          <div class="arabic">${e.heard||'—'}</div>
+          <div class="norm">${e.heardNorm||'—'}</div>
+          <div class="phoneme">IPA: ${e.heardPhoneme||'—'}</div>
+        </div>
+        <div>
+          <div class="col-label">Why it failed</div>
+          <div class="reason">${e.reason||'—'}</div>
+          <div class="meta">${meta}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  list.innerHTML = rows;
+}
+
+// =========================================================================
+// UI — surah picker, ayah rendering, stats, status.
+// =========================================================================
+const surahGrid   = document.getElementById('surahGrid');
+const searchInput = document.getElementById('searchInput');
+const step2       = document.getElementById('step2');
+const step2Title  = document.getElementById('step2Title');
+const ayahContainer = document.getElementById('ayahContainer');
+const micBtn      = document.getElementById('micBtn');
+const micLabel    = document.getElementById('micLabel');
+const statusEl    = document.getElementById('status');
+const playbackRow = document.getElementById('playbackRow');
+const playBtn     = document.getElementById('playBtn');
+const progressFill= document.getElementById('progressFill');
+const timeLabel   = document.getElementById('timeLabel');
+const playbackAudio=document.getElementById('playbackAudio');
+const transcriptBox= document.getElementById('transcriptBox');
+const transcriptText=document.getElementById('transcriptText');
+const transcriptConf=document.getElementById('transcriptConf');
+
+function renderSurahGrid(filter){
+  const q = (filter || '').trim().toLowerCase();
+  surahGrid.innerHTML = '';
+  SURAH_META.forEach(s => {
+    if(q){
+      const hay = `${s.num} ${s.translit} ${s.meaning} ${s.name}`.toLowerCase();
+      if(!hay.includes(q)) return;
+    }
+    const card = document.createElement('button');
+    card.className = 'surah-card';
+    card.dataset.num = String(s.num);
+    card.innerHTML = `
+      <div class="sc-id">Surah ${s.num}</div>
+      <div class="sc-name-ar">${s.name}</div>
+      <div class="sc-name-en">${s.translit} · ${s.meaning}</div>
+      <div class="sc-verses">${s.verses} ayahs</div>
+    `;
+    card.addEventListener('click', () => selectSurah(s.num, card));
+    surahGrid.appendChild(card);
+  });
+}
+
+async function selectSurah(num, cardEl){
+  if(!phonemeData){
+    statusEl.textContent = 'Phoneme data still loading — try again in a moment.';
+    return;
+  }
+  activeSurah = num;
+  document.querySelectorAll('.surah-card').forEach(c => c.classList.toggle('active', c === cardEl));
+  resetState();
+  step2.classList.remove('hidden');
+  step2Title.textContent = `② Recite Surah ${num}`;
+  buildSurah(num);
+}
+
+function resetState(){
+  refWords = [];
+  ayahEndIndex = [];
+  pointer = 0;
+  consecutiveMisses = 0;
+  stats = {correct:0, mistake:0, unclear:0};
+  debugLog = [];
+  committedWordCount = 0;
+  finalizedText = '';
+  confidences = [];
+  renderDebugPanel();
+  updateStats();
+  transcriptBox.classList.add('hidden');
+  playbackRow.classList.add('hidden');
+}
+
+function buildSurah(num){
+  const meta = SURAH_META.find(s => s.num === num);
+  if(!meta) return;
+  const surah = phonemeData?.[String(num)];
+  if(!surah){
+    ayahContainer.innerHTML = '<p style="color:var(--text-dim);text-align:center;padding:40px 0">Phoneme data for this surah is missing.</p>';
+    return;
+  }
+  ayahContainer.innerHTML = '';
+  const wordList = refWords = [];
+  ayahEndIndex = [];
+  let wordCounter = 0;
+
+  // iterate over every ayah in canonical order
+  const ayahKeys = Object.keys(surah).map(Number).sort((a,b)=>a-b);
+  ayahKeys.forEach(v => {
+    const verse = document.createElement('div');
+    verse.className = 'verse';
+    const label = document.createElement('span');
+    label.className = 'verse-label';
+    label.textContent = toArabicDigits(v);
+    verse.appendChild(label);
+    const posKeys = Object.keys(surah[v]).map(Number).sort((a,b)=>a-b);
+    posKeys.forEach(p => {
+      const [text, phoneme, tajweedStr] = surah[v][p];
+      const span = document.createElement('span');
+      span.className = 'word';
+      span.textContent = text;
+      // tooltip with phoneme + tajweed rules
+      const tooltip = document.createElement('div');
+      tooltip.className = 'phoneme-tooltip';
+      const rulesArr = (tajweedStr||'').split(',').filter(Boolean);
+      const ruleNames = rulesArr.map(r => {
+        const [ch, rule] = r.split(':');
+        return `<span style="color:var(--accent)">${ch}</span> → ${rule}`;
+      }).join('<br>');
+      tooltip.innerHTML = `
+        <div class="ipa">/${phoneme}/</div>
+        <div class="rules">${ruleNames || '<span style="color:var(--text-dim)">no Tajweed annotations</span>'}</div>
+      `;
+      span.appendChild(tooltip);
+      // mark up by Tajweed rule for border colors
+      const ruleSet = new Set(rulesArr.map(r => r.split(':')[1]));
+      if(ruleSet.has('TAFKHEEM'))                  span.classList.add('tajweed-tafkheem');
+      if(ruleSet.has('QALQALA_KUBRA')||ruleSet.has('QALQALA_SUGHRA')) span.classList.add('tajweed-qalqala');
+      if(/MADD/.test([...ruleSet].join(' ')))      span.classList.add('tajweed-madd');
+      if(ruleSet.has('IDGHAM')||ruleSet.has('IDGHAM_SHAMSIYAH')||ruleSet.has('IDGHAM_QAMARIYAH')||ruleSet.has('IDGHAM_WAW')||ruleSet.has('IDGHAM_YAA')||ruleSet.has('IDGHAM_MEEM')||ruleSet.has('IDGHAM_LAM')||ruleSet.has('IDGHAM_NOON')) span.classList.add('tajweed-idgham');
+      if(ruleSet.has('IKHFAA')||ruleSet.has('IKHFAA_SHAFAWI')) span.classList.add('tajweed-ikhfaa');
+      if(ruleSet.has('IQLAB'))                     span.classList.add('tajweed-iqlab');
+      if(ruleSet.has('GHUNNA'))                    span.classList.add('tajweed-ghunna');
+      verse.appendChild(span);
+      wordCounter++;
+      wordList.push({
+        text,
+        norm: normalize(text),
+        phoneme,
+        el: span,
+        surah:num, ayah:v, position:p,
+      });
+    });
+    ayahContainer.appendChild(verse);
+    ayahEndIndex.push(wordCounter);
+  });
+}
+
+function updateStats(){
+  document.getElementById('statCorrect').textContent = stats.correct;
+  document.getElementById('statMistake').textContent = stats.mistake;
+  document.getElementById('statUnclear').textContent = stats.unclear;
+  document.getElementById('statPointer').textContent = `${pointer} / ${refWords.length}`;
+}
+
+function highlightCurrent(){
+  document.querySelectorAll('.word.now').forEach(el => el.classList.remove('now'));
+  if(pointer < refWords.length){
+    const el = refWords[pointer].el;
+    el.classList.add('now');
+    el.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+}
+
+function toArabicDigits(n){
+  const map = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+  return String(n).split('').map(d => map[+d] ?? d).join('');
+}
+
+// =========================================================================
+// SPEECH RECOGNITION
+// =========================================================================
+function getRecognitionCtor(){
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+async function startListening(){
+  const Ctor = getRecognitionCtor();
+  if(!Ctor){
+    statusEl.textContent = "This browser doesn't support live speech recognition (need Chrome/Edge desktop or Android).";
+    statusEl.classList.add('warn');
+    return;
+  }
+  if(!refWords.length){
+    statusEl.textContent = "Pick a surah first (or wait for it to finish loading).";
+    statusEl.classList.add('warn');
+    return;
+  }
+
+  recognition = new Ctor();
+  recognition.lang = 'ar-SA';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event) => {
+    let interim = '';
+    for(let i = event.resultIndex; i < event.results.length; i++){
+      const res = event.results[i];
+      if(res.isFinal){
+        finalizedText += res[0].transcript + ' ';
+        if(res[0].confidence > 0) confidences.push(res[0].confidence);
+      } else {
+        interim += res[0].transcript + ' ';
+      }
+    }
+    const fullText = (finalizedText + interim).trim();
+    if(fullText){
+      transcriptBox.classList.remove('hidden');
+      transcriptText.textContent = fullText;
+      if(confidences.length){
+        const avg = confidences.reduce((a,b)=>a+b,0) / confidences.length;
+        transcriptConf.textContent = `Avg confidence: ${(avg*100).toFixed(0)}% (${confidences.length} words)`;
+      }
+    }
+    const words = fullText.length ? fullText.split(/\s+/) : [];
+    for(let i = committedWordCount; i < words.length; i++){
+      processNewWord(words[i]);
+    }
+    if(words.length > committedWordCount) committedWordCount = words.length;
+  };
+
+  recognition.onerror = (e) => {
+    if(e.error === 'no-speech') return;  // natural pause — onend will restart
+    if(e.error === 'not-allowed' || e.error === 'audio-capture' || e.error === 'service-not-allowed'){
+      statusEl.textContent = 'Mic error: ' + e.error + '. Check microphone permissions.';
+      statusEl.classList.add('warn');
+      listening = false;
+      micBtn.classList.remove('listening');
+      micLabel.textContent = 'Start reciting';
+    }
+  };
+
+  recognition.onend = () => {
+    if(!listening) return;
+    // Chrome sometimes fires onend even with continuous=true; restart with a small delay
+    // (well-known race condition documented in the original code, kept here).
+    setTimeout(() => {
+      if(!listening) return;
+      try { recognition.start(); }
+      catch(e){
+        setTimeout(() => { if(listening){ try{ recognition.start(); }catch(_){} } }, 400);
+      }
+    }, 250);
+  };
+
+  try{
+    recognition.start();
+    listening = true;
+    micBtn.classList.add('listening');
+    micLabel.textContent = 'Listening… tap to stop';
+    statusEl.classList.remove('warn');
+    statusEl.textContent = 'Listening — recite naturally, the tracker follows along.';
+  }catch(e){
+    statusEl.textContent = "Couldn't start microphone: " + e.message;
+    return;
+  }
+
+  // Parallel MediaRecorder for playback (independent of recognition).
+  audioChunks = [];
+  navigator.mediaDevices.getUserMedia({audio:true}).then(stream => {
+    mediaStream = stream;
+    const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    mediaRecorder = mime ? new MediaRecorder(mediaStream, {mimeType:mime}) : new MediaRecorder(mediaStream);
+    mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      if(audioChunks.length){
+        const blob = new Blob(audioChunks, {type: mediaRecorder.mimeType || 'audio/webm'});
+        if(currentAudioURL) URL.revokeObjectURL(currentAudioURL);
+        currentAudioURL = URL.createObjectURL(blob);
+        playbackAudio.src = currentAudioURL;
+        playbackRow.classList.remove('hidden');
+        progressFill.style.width = '0%';
+        timeLabel.textContent = '0:00 / 0:00';
+        playBtn.textContent = '▶';
+      }
+      if(mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+    };
+    if(listening) mediaRecorder.start();
+  }).catch(() => { mediaRecorder = null; });
+}
+
+function stopListening(){
+  listening = false;
+  if(recognition){ try{ recognition.stop(); }catch(_){} }
+  if(mediaRecorder && mediaRecorder.state !== 'inactive'){ try{ mediaRecorder.stop(); }catch(_){} }
+  micBtn.classList.remove('listening');
+  micLabel.textContent = 'Start reciting';
+}
+
+function formatTime(t){
+  if(!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+playbackAudio.addEventListener('timeupdate', () => {
+  const cur = playbackAudio.currentTime;
+  const dur = playbackAudio.duration || 0;
+  timeLabel.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+  progressFill.style.width = dur ? `${(cur/dur)*100}%` : '0%';
+});
+playbackAudio.addEventListener('ended', () => { playBtn.textContent = '▶'; });
+playBtn.addEventListener('click', () => {
+  if(playbackAudio.paused){ playbackAudio.play(); playBtn.textContent = '❚❚'; }
+  else                    { playbackAudio.pause(); playBtn.textContent = '▶'; }
+});
+
+// =========================================================================
+// WIRE UP
+// =========================================================================
+micBtn.addEventListener('click', () => {
+  if(listening) stopListening();
+  else startListening();
+});
+document.getElementById('resetBtn').addEventListener('click', () => {
+  resetState();
+  if(activeSurah) buildSurah(activeSurah);
+  statusEl.textContent = 'Reset. Tap Start to recite again.';
+});
+document.getElementById('clearDebugBtn').addEventListener('click', () => {
+  debugLog = [];
+  renderDebugPanel();
+});
+searchInput.addEventListener('input', () => renderSurahGrid(searchInput.value));
+
+// =========================================================================
+// TEST MODE — exposes matcher logic to window for in-browser verification
+// without affecting production. The user can open the page and run in console:
+//   __matcher__.isFuzzyMatch("صراط", "صراط", "sˤiraˤ:tˤaˤ")
+// =========================================================================
+window.__matcher__ = {
+  normalize, phonemizeArabic, levRatio, isFuzzyMatch, levenshtein,
+};
+
+// =========================================================================
+// BOOT — load phoneme data, then render the picker.
+// =========================================================================
+(async function boot(){
+  try{
+    phonemeData = await loadPhonemeData();
+    if(!phonemeData){
+      statusEl.textContent = 'Phoneme data failed to load. Make sure phonemes-data.js is in the same directory.';
+      return;
+    }
+    renderSurahGrid('');
+  }catch(e){
+    console.error('boot failed:', e);
+    statusEl.textContent = 'Failed to load phoneme data: ' + e.message;
+  }
+})();
+</script>
+
+</body>
+</html>
