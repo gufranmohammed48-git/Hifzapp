@@ -473,8 +473,7 @@ function levenshtein(a, b){
 function isFuzzyMatch(a, b){
   if(!a || !b) return false;
   const dist = levenshtein(a,b);
-  const longest = Math.max(a.length,b.length);
-  const threshold = longest <= 3 ? 0 : Math.max(1, Math.floor(longest * 0.34));
+  const threshold = Math.max(1, Math.floor(Math.max(a.length,b.length) * 0.34));
   return dist <= threshold;
 }
 
@@ -716,23 +715,18 @@ function processNewWord(rawWord){
   const norm = normalize(rawWord);
   if(!norm || pointer >= refWords.length) return;
 
-  // Short reference words need a stricter (near-exact) match — a 1-letter tolerance
-  // on a 2-3 letter word matches almost anything, which is how a stray recognized
-  // sound can wrongly "steal" a match and derail the pointer.
   const nearMatch = findMatch(norm, pointer, pointer + NEAR_WINDOW);
+  console.log(`[align] heard "${rawWord}" (norm "${norm}") | pointer=${pointer} expecting "${refWords[pointer]?.norm}" | nearMatch=${nearMatch} | consecutiveMisses=${consecutiveMisses}`);
 
   if(nearMatch !== -1 && (nearMatch - pointer) <= 3){
     applyMatch(nearMatch);
     return;
   }
 
-  // No close, believable match. Rather than immediately trusting a distant match
-  // (which is often coincidental — e.g. a repeated word elsewhere in the ayah),
-  // require a few consecutive misses before treating it as "we've fallen behind
-  // and need to catch up," then allow a wider resync search.
   consecutiveMisses++;
   if(consecutiveMisses >= RESYNC_THRESHOLD){
     const farMatch = nearMatch !== -1 ? nearMatch : findMatch(norm, pointer + NEAR_WINDOW, pointer + FAR_WINDOW);
+    console.log(`[align] RESYNC triggered | farMatch=${farMatch}`);
     if(farMatch !== -1){
       applyMatch(farMatch);
     }
@@ -770,6 +764,7 @@ async function startListening(){
       }
     }
     const fullText = (finalizedText + interim).trim();
+    console.log(`[speech] finalizedText="${finalizedText.trim()}" | interim="${interim.trim()}"`);
     if(fullText){
       transcriptBox.classList.remove('hidden');
       transcriptText.textContent = fullText;
@@ -782,12 +777,37 @@ async function startListening(){
   };
 
   recognition.onerror = (e) => {
-    statusEl.textContent = "Mic error: " + e.error + ". Check microphone permissions.";
-    statusEl.classList.add('warn');
+    console.log(`[speech] onerror: ${e.error}`);
+    if(e.error === 'no-speech'){
+      // Normal during natural pauses — the onend handler below will restart us.
+      return;
+    }
+    if(e.error === 'not-allowed' || e.error === 'audio-capture' || e.error === 'service-not-allowed'){
+      statusEl.textContent = "Mic error: " + e.error + ". Check microphone permissions.";
+      statusEl.classList.add('warn');
+      listening = false; // stop pretending we're listening — restart would just fail again
+      micBtn.classList.remove('listening');
+      micDot.classList.remove('pulse');
+      micLabel.textContent = "Start reciting";
+    }
+    // Other transient errors (network hiccup, aborted, etc.) are left to onend's restart.
   };
 
   recognition.onend = () => {
-    if(listening){ try { recognition.start(); } catch(e) {} }
+    console.log(`[speech] onend fired | listening=${listening}`);
+    if(!listening) return;
+    // Restarting in the same tick right after 'end' is a known race condition in
+    // Chrome that can silently fail — give it a brief moment before retrying.
+    setTimeout(() => {
+      if(!listening) return;
+      try{
+        recognition.start();
+        console.log('[speech] restarted successfully');
+      }catch(e){
+        console.log(`[speech] restart failed: ${e.message}, retrying...`);
+        setTimeout(() => { if(listening){ try{ recognition.start(); console.log('[speech] second restart attempt succeeded'); }catch(e2){ console.log(`[speech] second restart also failed: ${e2.message}`); } } }, 400);
+      }
+    }, 250);
   };
 
   // Separate audio capture so we can play back what was recited
