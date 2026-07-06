@@ -263,6 +263,28 @@
   }
   .transcript-head span{ color: var(--green); text-transform:none; letter-spacing:0; }
   .transcript-text{ font-family:'Amiri', serif; font-size: 19px; line-height:1.8; color: var(--text); }
+
+  .debug-box{
+    background: var(--card);
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-top: 16px;
+    font-family: 'Inter', monospace;
+    font-size: 12.5px;
+  }
+  .debug-head{
+    font-size: 10.5px; letter-spacing:.05em; text-transform:uppercase;
+    color: var(--text-dim); margin-bottom: 10px;
+  }
+  .debug-grid{
+    display:grid; grid-template-columns: auto 1fr;
+    gap: 6px 14px; align-items:start;
+  }
+  .debug-label{ color: var(--text-dim); white-space:nowrap; }
+  #debugGrid > div:nth-child(even){ color: var(--text); }
+  #dbgVerdict.ok{ color: var(--green); }
+  #dbgVerdict.fail{ color: var(--red); }
 </style>
 </head>
 <body>
@@ -333,6 +355,20 @@
         <div class="transcript-head">Transcribed audio <span id="transcriptConf"></span></div>
         <div class="transcript-text" id="transcriptText" dir="rtl"></div>
       </div>
+
+      <div class="debug-box" id="debugBox">
+        <div class="debug-head">Debug — last word processed</div>
+        <div class="debug-grid" id="debugGrid">
+          <div class="debug-label">Status</div><div id="dbgStatus">Waiting for speech…</div>
+          <div class="debug-label">You said (raw)</div><div id="dbgRaw" dir="rtl">—</div>
+          <div class="debug-label">You said (normalized)</div><div id="dbgHeardNorm">—</div>
+          <div class="debug-label">Expected word (raw)</div><div id="dbgExpectedRaw" dir="rtl">—</div>
+          <div class="debug-label">Expected (normalized)</div><div id="dbgExpectedNorm">—</div>
+          <div class="debug-label">Edit distance / threshold</div><div id="dbgDistance">—</div>
+          <div class="debug-label">Pointer / total words</div><div id="dbgPointer">—</div>
+          <div class="debug-label">Verdict</div><div id="dbgVerdict">—</div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -400,35 +436,27 @@ const SURAH_META = [
   [113,"Al-Falaq","الفلق","The Daybreak",5],[114,"An-Nas","الناس","Mankind",6]
 ].map(([num,translit,arabic,meaning,ayahCount]) => ({num,translit,arabic,meaning,ayahCount}));
 
-// Local fallback for two short surahs (works even if the network request fails);
-// everything else is fetched live from the Al Quran Cloud API and cached here.
-const SURAH_TEXT_CACHE = {
-  1: [
-    "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
-    "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ",
-    "الرَّحْمَٰنِ الرَّحِيمِ",
-    "مَالِكِ يَوْمِ الدِّينِ",
-    "إِيَّاكَ نَعْبُدُ وَإِيَّاكَ نَسْتَعِينُ",
-    "اهْدِنَا الصِّرَاطَ الْمُسْتَقِيمَ",
-    "صِرَاطَ الَّذِينَ أَنْعَمْتَ عَلَيْهِمْ غَيْرِ الْمَغْضُوبِ عَلَيْهِمْ وَلَا الضَّالِّينَ"
-  ],
-  112: [
-    "قُلْ هُوَ اللَّهُ أَحَدٌ",
-    "اللَّهُ الصَّمَدُ",
-    "لَمْ يَلِدْ وَلَمْ يُولَدْ",
-    "وَلَمْ يَكُنْ لَهُ كُفُوًا أَحَدٌ"
-  ]
-};
+// Every surah, including Fatiha and Ikhlas, is fetched live from the API and cached here.
+const SURAH_TEXT_CACHE = {};
 
 async function fetchSurahText(num){
   if(SURAH_TEXT_CACHE[num]) return SURAH_TEXT_CACHE[num];
-  const res = await fetch(`https://api.alquran.cloud/v1/surah/${num}/quran-uthmani`);
-  if(!res.ok) throw new Error('Request failed: ' + res.status);
-  const data = await res.json();
-  if(data.code !== 200 || !data.data || !data.data.ayahs) throw new Error('Unexpected response');
-  const ayahs = data.data.ayahs.map(a => a.text);
-  SURAH_TEXT_CACHE[num] = ayahs;
-  return ayahs;
+  let lastError;
+  for(let attempt = 0; attempt < 2; attempt++){
+    try{
+      const res = await fetch(`https://api.alquran.cloud/v1/surah/${num}/quran-uthmani`);
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if(data.code !== 200 || !data.data || !data.data.ayahs) throw new Error('Unexpected response shape');
+      const ayahs = data.data.ayahs.map(a => a.text);
+      SURAH_TEXT_CACHE[num] = ayahs;
+      return ayahs;
+    }catch(e){
+      lastError = e;
+      console.log(`[fetch] surah ${num} attempt ${attempt+1} failed: ${e.message}`);
+    }
+  }
+  throw lastError;
 }
 
 function normalize(word){
@@ -711,14 +739,50 @@ function applyMatch(matchAt){
   }
 }
 
+const dbgStatus = document.getElementById('dbgStatus');
+const dbgRaw = document.getElementById('dbgRaw');
+const dbgHeardNorm = document.getElementById('dbgHeardNorm');
+const dbgExpectedRaw = document.getElementById('dbgExpectedRaw');
+const dbgExpectedNorm = document.getElementById('dbgExpectedNorm');
+const dbgDistance = document.getElementById('dbgDistance');
+const dbgPointer = document.getElementById('dbgPointer');
+const dbgVerdict = document.getElementById('dbgVerdict');
+
+function updateDebugPanel(rawWord, norm, verdictText, isOk){
+  const expected = refWords[pointer];
+  dbgStatus.textContent = "Last word heard";
+  dbgRaw.textContent = rawWord || '—';
+  dbgHeardNorm.textContent = norm || '—';
+  dbgExpectedRaw.textContent = expected ? expected.text : '(surah complete)';
+  dbgExpectedNorm.textContent = expected ? expected.norm : '—';
+  if(expected && norm){
+    const dist = levenshtein(norm, expected.norm);
+    const threshold = Math.max(1, Math.floor(Math.max(norm.length, expected.norm.length) * 0.34));
+    dbgDistance.textContent = `${dist} / ${threshold} (${dist <= threshold ? 'within tolerance' : 'too different'})`;
+  } else {
+    dbgDistance.textContent = '—';
+  }
+  dbgPointer.textContent = `${pointer} / ${refWords.length}`;
+  dbgVerdict.textContent = verdictText;
+  dbgVerdict.className = isOk ? 'ok' : 'fail';
+}
+
 function processNewWord(rawWord){
   const norm = normalize(rawWord);
-  if(!norm || pointer >= refWords.length) return;
+  if(!norm){
+    updateDebugPanel(rawWord, norm, 'Empty after normalization — ignored (likely silence/noise artifact)', false);
+    return;
+  }
+  if(pointer >= refWords.length){
+    updateDebugPanel(rawWord, norm, 'Surah already complete — ignored', false);
+    return;
+  }
 
   const nearMatch = findMatch(norm, pointer, pointer + NEAR_WINDOW);
   console.log(`[align] heard "${rawWord}" (norm "${norm}") | pointer=${pointer} expecting "${refWords[pointer]?.norm}" | nearMatch=${nearMatch} | consecutiveMisses=${consecutiveMisses}`);
 
   if(nearMatch !== -1 && (nearMatch - pointer) <= 3){
+    updateDebugPanel(rawWord, norm, `Matched reference word #${nearMatch} (${nearMatch === pointer ? 'expected position' : 'skipped ' + (nearMatch - pointer) + ' word(s)'}) → turned GREEN`, true);
     applyMatch(nearMatch);
     return;
   }
@@ -728,9 +792,12 @@ function processNewWord(rawWord){
     const farMatch = nearMatch !== -1 ? nearMatch : findMatch(norm, pointer + NEAR_WINDOW, pointer + FAR_WINDOW);
     console.log(`[align] RESYNC triggered | farMatch=${farMatch}`);
     if(farMatch !== -1){
+      updateDebugPanel(rawWord, norm, `No close match after ${consecutiveMisses} misses — RESYNCED to word #${farMatch}, skipped words marked wrong/unclear → turned RED`, false);
       applyMatch(farMatch);
+      return;
     }
   }
+  updateDebugPanel(rawWord, norm, `No match found within lookahead window — word ignored, pointer unchanged (miss ${consecutiveMisses}/${RESYNC_THRESHOLD})`, false);
 }
 
 // ---- Speech recognition + audio recording ----
@@ -745,7 +812,11 @@ async function startListening(){
     statusEl.classList.add('warn');
     return;
   }
-  if(!refWords.length) return;
+  if(!refWords.length){
+    statusEl.textContent = "No surah text is loaded yet — pick a surah above first (or wait for it to finish loading).";
+    statusEl.classList.add('warn');
+    return;
+  }
 
   recognition = new Ctor();
   recognition.lang = 'ar-SA';
@@ -810,10 +881,24 @@ async function startListening(){
     }, 250);
   };
 
-  // Separate audio capture so we can play back what was recited
-  audioChunks = [];
   try{
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recognition.start();
+    listening = true;
+    micBtn.classList.add('listening');
+    micDot.classList.add('pulse');
+    micLabel.textContent = "Listening… tap to stop";
+    statusEl.classList.remove('warn');
+    statusEl.textContent = "Listening — recite naturally, the tracker follows along.";
+  }catch(e){
+    statusEl.textContent = "Couldn't start microphone: " + e.message;
+    return;
+  }
+
+  // Separate audio capture so we can play back what was recited. This is a nice-to-have —
+  // it runs independently and must never block or interfere with recognition above.
+  audioChunks = [];
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    mediaStream = stream;
     const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
     mediaRecorder = mimeType ? new MediaRecorder(mediaStream, { mimeType }) : new MediaRecorder(mediaStream);
     mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) audioChunks.push(e.data); };
@@ -830,23 +915,12 @@ async function startListening(){
       }
       mediaStream.getTracks().forEach(t => t.stop());
     };
-    mediaRecorder.start();
-  }catch(e){
-    // Recording is a nice-to-have; recognition still works without it
+    // Only start recording if we're still listening by the time permission resolves.
+    if(listening) mediaRecorder.start();
+  }).catch(() => {
+    // Recording is optional; recognition already started above and is unaffected.
     mediaRecorder = null;
-  }
-
-  try{
-    recognition.start();
-    listening = true;
-    micBtn.classList.add('listening');
-    micDot.classList.add('pulse');
-    micLabel.textContent = "Listening… tap to stop";
-    statusEl.classList.remove('warn');
-    statusEl.textContent = "Listening — recite naturally, the tracker follows along.";
-  }catch(e){
-    statusEl.textContent = "Couldn't start microphone: " + e.message;
-  }
+  });
 }
 
 function stopListening(){
