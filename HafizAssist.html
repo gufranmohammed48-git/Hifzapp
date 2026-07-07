@@ -136,7 +136,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.2</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.4</div>
 
 <div class="app">
 
@@ -361,14 +361,14 @@ let activeSurah    = null;
 let phonemeData    = null;   // will be loaded asynchronously on startup
 
 // =========================================================================
-// PHONEME DATA LOADER — pulls SURAH_PHONEMES from js/phonemes-data.js
+// PHONEME DATA LOADER — pulls SURAH_PHONEMES from sibling phonemes-data.js
 // =========================================================================
 async function loadPhonemeData(){
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = 'js/phonemes-data.js';
+    s.src = 'phonemes-data.js';
     s.onload = () => resolve(window.SURAH_PHONEMES || null);
-    s.onerror = () => reject(new Error('js/phonemes-data.js failed to load'));
+    s.onerror = () => reject(new Error('phonemes-data.js failed to load'));
     document.head.appendChild(s);
   });
 }
@@ -1002,7 +1002,7 @@ window.__matcher__ = {
   try{
     phonemeData = await loadPhonemeData();
     if(!phonemeData){
-      statusEl.textContent = 'Phoneme data failed to load. Make sure js/phonemes-data.js is in the same directory as this HTML.';
+      statusEl.textContent = 'Phoneme data failed to load. Make sure phonemes-data.js is in the same directory as this HTML.';
       return;
     }
     renderSurahGrid('');
