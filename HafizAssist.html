@@ -136,7 +136,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.5</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.6</div>
 
 <div class="app">
 
@@ -484,10 +484,10 @@ function isFuzzyMatch(heardNorm, expectedNorm, expectedPhonemes){
     if(heardPh && heardPh.length >= 3 && expectedPhonemes.length >= 3){
       const phRatio = levRatio(heardPh, expectedPhonemes);
       if(phRatio >= (1 - PHONEME_LEVENSHTEIN_RATIO)){
-        return {matched:true, kind:'phoneme', ratio:phRatio, heardPh, expectedPh};
+        return {matched:true, kind:'phoneme', ratio:phRatio, heardPh, expectedPhonemes};
       }
       // Record what we tried so the debug panel can show the phoneme mismatch.
-      return {matched:false, kind:'phoneme', ratio:phRatio, heardPh, expectedPh, textRatio:r};
+      return {matched:false, kind:'phoneme', ratio:phRatio, heardPh, expectedPhonemes, textRatio:r};
     }
   }
 
@@ -527,8 +527,9 @@ function applyMatch(matchAt, matchInfo, heardWord){
       expected:w.text, expectedNorm:w.norm,
       expectedPhoneme:w.phoneme,
       surah:activeSurah, ayah:w.ayah, position:w.position,
-      reason:`Skipped — pointer was at ${pointer}, jumped to ${matchAt} ` +
-             `(matched "${heardWord || '?'}" against "${w.norm}" with ${matchInfo.kind}, ratio=${(matchInfo.ratio||0).toFixed(2)})`,
+      reason:`Skipped "${w.norm}" (position ${i}). Pointer was at ${pointer}, jumped to ${matchAt} ` +
+             `because "${heardWord || '?'}" matched refWords[${matchAt}].norm="${refWords[matchAt].norm}" ` +
+             `(${matchInfo.kind}, ratio=${(matchInfo.ratio||0).toFixed(2)})`,
       ts: Date.now(),
     });
   }
@@ -877,14 +878,38 @@ async function startListening(){
       transcriptText.textContent = fullText;
       if(confidences.length){
         const avg = confidences.reduce((a,b)=>a+b,0) / confidences.length;
-        transcriptConf.textContent = `Avg confidence: ${(avg*100).toFixed(0)}% (${confidences.length} words)`;
+        transcriptConf.textContent = `Avg confidence: ${(avg*100).toFixed(0)}% (${confidences.length} finalized)`;
       }
     }
+    
+    // === RE-PROCESS ALL WORDS FROM SCRATCH ON EVERY TICK ===
+    // Why: Chrome's interim results grow left→right, and the same word slot
+    // can change content as recognition refines ("يس" → "يسالونك"). Tracking
+    // committedWordCount is wrong — it doesn't notice when a previously-
+    // processed word has been updated, so the matcher falls behind and marks
+    // correct words as 'unclear' on the next interim tick.
+    //
+    // Re-processing every tick is O(N) per tick. With surahs ≤ 6236 words
+    // and Chrome sending <10 ticks/sec, that's <60k matches/sec — fine.
     const words = fullText.length ? fullText.split(/\s+/) : [];
-    for(let i = committedWordCount; i < words.length; i++){
+    
+    // Reset marks on ALL refWords (we'll re-derive state from scratch)
+    for(let i = 0; i < refWords.length; i++){
+      refWords[i].el.dataset.status = '';
+    }
+    pointer = 0;
+    consecutiveMisses = 0;
+    stats = {correct:0, mistake:0, unclear:0};
+    debugLog = [];
+    
+    // Re-process every word
+    for(let i = 0; i < words.length; i++){
       processNewWord(words[i]);
     }
-    if(words.length > committedWordCount) committedWordCount = words.length;
+    committedWordCount = words.length;
+    highlightCurrent();
+    renderDebugPanel();
+    updateStats();
   };
 
   recognition.onerror = (e) => {
@@ -982,9 +1007,22 @@ micBtn.addEventListener('click', () => {
   else startListening();
 });
 document.getElementById('resetBtn').addEventListener('click', () => {
+  // Stop recognition first if it's still running (state may be inconsistent)
+  if(listening) stopListening();
+  // Reset every piece of state
   resetState();
   if(activeSurah) buildSurah(activeSurah);
+  // Explicitly clear the live transcript text (resetState only hides the box)
+  transcriptText.textContent = '';
+  transcriptConf.textContent = '';
+  transcriptBox.classList.add('hidden');
   statusEl.textContent = 'Reset. Tap Start to recite again.';
+  // Scroll to top so user sees the fresh state (search bar, etc.)
+  window.scrollTo({top: 0, behavior: 'smooth'});
+  // Force re-render
+  highlightCurrent();
+  renderDebugPanel();
+  updateStats();
 });
 document.getElementById('clearDebugBtn').addEventListener('click', () => {
   debugLog = [];
