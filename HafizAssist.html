@@ -51,7 +51,7 @@
   .searchbar{display:flex;gap:10px;margin-bottom:14px}
   .searchbar input{flex:1;background:var(--card);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:8px;font-size:14px;outline:none}
   .searchbar input:focus{border-color:var(--green)}
-  .surah-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;max-height:420px;overflow-y:auto;padding:4px}
+  .surah-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;max-height:200px;overflow-y:auto;padding:4px}
   .surah-grid::-webkit-scrollbar{width:8px}
   .surah-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
   .surah-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;cursor:pointer;transition:all .15s ease;text-align:left;font-family:inherit;color:var(--text)}
@@ -61,7 +61,7 @@
   .sc-name-ar{font-family:'Amiri',serif;font-size:18px;margin-top:4px;color:var(--text)}
   .sc-name-en{font-size:11px;color:var(--text-dim);margin-top:2px}
   .sc-verses{font-size:10px;color:var(--text-dim);margin-top:2px}
-  #ayahContainer{font-family:'Amiri',serif;font-size:28px;line-height:2.2;direction:rtl;text-align:right;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;min-height:120px}
+  #ayahContainer{font-family:'Amiri',serif;font-size:28px;line-height:2.2;direction:rtl;text-align:right;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;height:380px;max-height:380px;overflow-y:auto;transition:filter .2s ease,opacity .2s ease}
   #ayahContainer .verse{margin-bottom:16px}
   #ayahContainer .verse:last-child{margin-bottom:0}
   #ayahContainer .verse-label{display:inline-block;background:var(--primary-soft);color:var(--primary);font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:8px;vertical-align:middle}
@@ -71,6 +71,13 @@
   .word[data-status="mistake"]{background:var(--red-soft);color:var(--red);border-color:rgba(231,76,60,.3);text-decoration:line wavy var(--red)}
   .word[data-status="unclear"]{background:var(--yellow-soft);color:var(--yellow);border-color:rgba(241,196,15,.3)}
   .word.now{box-shadow:0 0 0 3px var(--primary);transform:scale(1.05)}
+  /* === Hide Script mode ===
+     When ayahContainer has .script-hidden, blur + dim all words EXCEPT
+     the current pointer word (.now). Lets the user test their memory
+     while still seeing where they are. */
+  #ayahContainer.script-hidden .word{filter:blur(6px);opacity:.25}
+  #ayahContainer.script-hidden .word.now{filter:none;opacity:1;transform:scale(1.2);box-shadow:0 0 0 3px var(--primary),0 0 24px rgba(108,159,235,.4)}
+  #ayahContainer.script-hidden .verse-label{filter:blur(6px);opacity:.25}
   .word.tajweed-tafkheem{border-bottom:3px solid var(--red)}
   .word.tajweed-qalqala{border-bottom:3px solid var(--yellow)}
   .word.tajweed-madd{border-bottom:3px solid var(--blue)}
@@ -136,7 +143,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.6</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.7</div>
 
 <div class="app">
 
@@ -176,6 +183,7 @@
       <span class="mic-dot"></span>
       <span id="micLabel">Start reciting</span>
     </button>
+    <button class="toggle-script-btn" id="toggleScriptBtn" title="Toggle the visible mushaf text">Hide Script</button>
     <span class="status" id="status">Pick a surah above first.</span>
   </div>
 
@@ -732,6 +740,9 @@ async function selectSurah(num, cardEl){
   step2.classList.remove('hidden');
   step2Title.textContent = `② Recite Surah ${num}`;
   buildSurah(num);
+  // Scroll the recite section into view so the user sees the words,
+  // not the surah picker they just clicked.
+  setTimeout(() => step2.scrollIntoView({behavior: 'smooth', block: 'start'}), 50);
 }
 
 function resetState(){
@@ -1023,6 +1034,20 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   highlightCurrent();
   renderDebugPanel();
   updateStats();
+});
+// === Hide Script / Show Script toggle ===
+// Lets the user hide the visible mushaf text to test their memory.
+// When hidden: all words except the current pointer (.now) are blurred
+// and dimmed so the user sees roughly where they are but can't peek.
+const toggleScriptBtn = document.getElementById('toggleScriptBtn');
+let scriptHidden = false;
+toggleScriptBtn.addEventListener('click', () => {
+  scriptHidden = !scriptHidden;
+  ayahContainer.classList.toggle('script-hidden', scriptHidden);
+  toggleScriptBtn.textContent = scriptHidden ? 'Show Script' : 'Hide Script';
+  toggleScriptBtn.title = scriptHidden
+    ? 'Show the full mushaf text (currently hidden for memory test)'
+    : 'Hide the mushaf text to test your memory';
 });
 document.getElementById('clearDebugBtn').addEventListener('click', () => {
   debugLog = [];
