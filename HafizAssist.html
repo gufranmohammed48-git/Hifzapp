@@ -103,7 +103,9 @@
   .mic-btn.listening:hover{box-shadow:0 6px 20px rgba(231,76,60,.35)}
   .mic-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
   .mic-dot{width:10px;height:10px;border-radius:50%;background:#0a1f12}
-  .mic-btn.listening .mic-dot{background:#fff;animation:pulse 1.2s ease-in-out infinite}
+  .mic-btn.listening .mic-dot{background:#fff;animation:pulse 1s ease-in-out infinite;box-shadow:0 0 12px rgba(255,255,255,.8)}
+  /* Larger visual ring on the listening button so the user can SEE it's active */
+  .mic-btn.listening{box-shadow:0 0 0 6px rgba(231,76,60,.25),0 6px 20px rgba(231,76,60,.4)}
   @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.4);opacity:.5}}
   .status{color:var(--text-dim);font-size:13px;margin-left:8px}
   .status.warn{color:var(--yellow)}
@@ -155,7 +157,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.9</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">3.0</div>
 
 <div class="app">
 
@@ -943,13 +945,37 @@ async function startListening(){
   };
 
   recognition.onerror = (e) => {
-    if(e.error === 'no-speech') return;  // natural pause — onend will restart
-    if(e.error === 'not-allowed' || e.error === 'audio-capture' || e.error === 'service-not-allowed'){
-      statusEl.textContent = 'Mic error: ' + e.error + '. Check microphone permissions.';
+    // Show a clear status for every error so the user knows what's wrong.
+    if(e.error === 'no-speech'){
+      // Don't disable — Chrome's continuous mode just had a quiet moment.
+      // But on mobile, repeated no-speech often means Arabic pack missing
+      // or mic is not picking anything up. After 3 in a row, surface a hint.
+      noSpeechStreak = (noSpeechStreak || 0) + 1;
+      if(noSpeechStreak >= 3){
+        statusEl.textContent = 'No speech detected — speak louder, or check your phone\'s Arabic voice input is enabled (Settings → Languages → Arabic → Speech).';
+        statusEl.classList.add('warn');
+      }
+      return;
+    }
+    noSpeechStreak = 0;
+    if(e.error === 'not-allowed' || e.error === 'audio-capture'){
+      statusEl.textContent = 'Mic error: ' + e.error + '. Check microphone permissions in your browser settings.';
       statusEl.classList.add('warn');
       listening = false;
       micBtn.classList.remove('listening');
       micLabel.textContent = 'Start reciting';
+    } else if(e.error === 'service-not-allowed'){
+      statusEl.textContent = 'Speech recognition service blocked. On Android Chrome: Settings → Site settings → Microphone, allow this site.';
+      statusEl.classList.add('warn');
+      listening = false;
+      micBtn.classList.remove('listening');
+      micLabel.textContent = 'Start reciting';
+    } else if(e.error === 'network'){
+      statusEl.textContent = 'Speech recognition needs internet — Chrome sends audio to Google\'s servers. Check your connection.';
+      statusEl.classList.add('warn');
+    } else {
+      statusEl.textContent = 'Recognition error: ' + e.error + '. Tap Start to retry.';
+      statusEl.classList.add('warn');
     }
   };
 
@@ -966,15 +992,27 @@ async function startListening(){
     }, 250);
   };
 
+  // Diagnostic: surface context info so the user knows if mobile is blocking us.
+  const isInsecureContext = !window.isSecureContext;
+  if(isInsecureContext && location.protocol !== 'file:'){
+    statusEl.textContent = 'Note: this page is not on HTTPS — speech recognition may be limited. Mobile Chrome requires HTTPS.';
+    statusEl.classList.add('warn');
+  }
+
   try{
     recognition.start();
     listening = true;
     micBtn.classList.add('listening');
     micLabel.textContent = 'Listening… tap to stop';
     statusEl.classList.remove('warn');
-    statusEl.textContent = 'Listening — recite naturally, the tracker follows along.';
+    statusEl.textContent = 'Listening (Arabic) — recite naturally. The tracker follows along.';
+    noSpeechStreak = 0;
+    // Show a clear visual hint that the app is live even if Android's beep
+    // is hard to hear. The pulsing red dot in the mic button does this.
   }catch(e){
-    statusEl.textContent = "Couldn't start microphone: " + e.message;
+    statusEl.textContent = "Couldn't start microphone: " + (e.message || e.name) +
+      '. On Android Chrome, ensure microphone is allowed and Arabic voice input is enabled.';
+    statusEl.classList.add('warn');
     return;
   }
 
@@ -1041,6 +1079,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   if(listening) stopListening();
   // Reset recite-section state
   resetState();
+  noSpeechStreak = 0;
   // Clear the live transcript text (resetState only hides the box)
   transcriptText.textContent = '';
   transcriptConf.textContent = '';
