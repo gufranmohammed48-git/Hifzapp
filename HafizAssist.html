@@ -155,7 +155,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.8</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">2.9</div>
 
 <div class="app">
 
@@ -1039,17 +1039,25 @@ micBtn.addEventListener('click', () => {
 document.getElementById('resetBtn').addEventListener('click', () => {
   // Stop recognition first if it's still running (state may be inconsistent)
   if(listening) stopListening();
-  // Reset every piece of state
+  // Reset recite-section state
   resetState();
-  if(activeSurah) buildSurah(activeSurah);
-  // Explicitly clear the live transcript text (resetState only hides the box)
+  // Clear the live transcript text (resetState only hides the box)
   transcriptText.textContent = '';
   transcriptConf.textContent = '';
   transcriptBox.classList.add('hidden');
-  statusEl.textContent = 'Reset. Tap Start to recite again.';
-  // Scroll to top so user sees the fresh state (search bar, etc.)
+  // Clear the search bar so the surah picker shows all 114 surahs again
+  searchInput.value = '';
+  // Deselect any active surah card + reset active surah
+  activeSurah = null;
+  document.querySelectorAll('.surah-card.active').forEach(c => c.classList.remove('active'));
+  // Hide the recite section so the user is back at the picker
+  step2.classList.add('hidden');
+  statusEl.textContent = 'Reset. Pick a surah above to start.';
+  // Re-render the full surah grid
+  renderSurahGrid('');
+  // Scroll back to the top so the user sees the cleared state
   window.scrollTo({top: 0, behavior: 'smooth'});
-  // Force re-render
+  // Force re-render of any stale UI
   highlightCurrent();
   renderDebugPanel();
   updateStats();
