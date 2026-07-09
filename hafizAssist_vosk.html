@@ -157,7 +157,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">3.0-vosk</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">3.0.1-vosk</div>
 
 <div class="app">
 
@@ -952,7 +952,13 @@ async function startListening(){
       audio: {channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true}
     });
   }catch(err){
-    statusEl.textContent = 'Mic access denied: ' + (err.message || err.name) + '. On Android Chrome, ensure microphone is allowed for this site.';
+    let msg = 'Mic access denied: ' + (err.message || err.name);
+    if(location.protocol === 'file:' || !window.isSecureContext){
+      msg += '. This page is NOT served over HTTPS — Android Chrome blocks the mic on file:// or http://. Open the page over HTTPS (e.g. https://gufranmohammed48-git.github.io/Hifzapp/hafizAssist_vosk.html) instead of downloading the file.';
+    } else {
+      msg += '. On Android Chrome: tap the lock icon in the address bar → Permissions → Microphone → Allow.';
+    }
+    statusEl.textContent = msg;
     statusEl.classList.add('warn');
     return;
   }
@@ -1118,7 +1124,13 @@ function startListeningWebkit(Ctor){
     }
     noSpeechStreak = 0;
     if(e.error === 'not-allowed' || e.error === 'audio-capture'){
-      statusEl.textContent = 'Mic error: ' + e.error + '. Check microphone permissions.';
+      let msg = 'Mic error: ' + e.error + '.';
+      if(location.protocol === 'file:' || !window.isSecureContext){
+        msg += ' This page is NOT on HTTPS — Android Chrome blocks the mic on file:// or http://. Open the page over HTTPS (e.g. https://gufranmohammed48-git.github.io/Hifzapp/hafizAssist_vosk.html) instead of downloading it.';
+      } else {
+        msg += ' Tap the lock icon in the address bar → Permissions → Microphone → Allow.';
+      }
+      statusEl.textContent = msg;
       statusEl.classList.add('warn');
       listening = false;
       micBtn.classList.remove('listening');
