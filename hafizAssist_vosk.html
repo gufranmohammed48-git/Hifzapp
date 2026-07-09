@@ -157,7 +157,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">3.0.1-vosk</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">3.0.2-vosk</div>
 
 <div class="app">
 
@@ -949,7 +949,7 @@ async function startListening(){
   // === Vosk path ===
   try{
     voskMediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true}
+      audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}
     });
   }catch(err){
     let msg = 'Mic access denied: ' + (err.message || err.name);
@@ -964,7 +964,10 @@ async function startListening(){
   }
 
   // Set up the recognizer
-  voskRecognizer = new voskModel.KaldiRecognizer(16000);
+  // CRITICAL: KaldiRecognizer needs the SAME sample rate as the AudioContext,
+  // otherwise it can't decode the audio waveform. Mobile Chrome typically uses
+  // 48000Hz. Vosk will internally resample to whatever the model needs.
+  voskRecognizer = new voskModel.KaldiRecognizer(voskAudioContext.sampleRate);
   voskRecognizer.setWords(true);
 
   // Vosk partial events: continuous stream of growing transcript strings.
@@ -987,7 +990,10 @@ async function startListening(){
 
   // Wire up audio capture → recognizer via ScriptProcessorNode
   // (deprecated API but universally supported and used by Vosk's own examples)
-  voskAudioContext = new AudioContext({sampleRate: 16000});
+  // Don't force sampleRate — mobile Chrome always uses the device's native rate
+  // (typically 48000Hz on phones). Forcing 16000 either fails silently or is
+  // overridden, leading to audio reaching Vosk at the wrong rate.
+  voskAudioContext = new AudioContext();
   const source = voskAudioContext.createMediaStreamSource(voskMediaStream);
   voskProcessorNode = voskAudioContext.createScriptProcessor(4096, 1, 1);
   source.connect(voskProcessorNode);
