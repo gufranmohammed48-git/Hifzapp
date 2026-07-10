@@ -1,0 +1,9 @@
+backend/
+mobile/
+web/
+screenshots/
+__pycache__/
+*.pyc
+.venv/
+.env
+node_modules/
