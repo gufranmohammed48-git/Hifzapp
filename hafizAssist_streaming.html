@@ -118,6 +118,10 @@
   .gain-label{display:inline-flex;align-items:center;gap:6px;background:var(--card);color:var(--text);border:1px solid var(--border);font-size:12px;font-weight:600;padding:6px 14px;border-radius:30px;font-family:inherit}
   .gain-label input[type=range]{width:80px;accent-color:var(--primary);cursor:pointer}
   .gain-label #gainValue{min-width:32px;text-align:right;color:var(--primary);font-variant-numeric:tabular-nums}
+  .vu-meter{display:inline-flex;flex-direction:column;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 14px;min-width:200px}
+  .vu-bar{width:100%;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;position:relative}
+  .vu-bar::before{content:'';position:absolute;left:0;top:0;bottom:0;width:var(--vu-width,0%);background:linear-gradient(90deg,var(--green) 0%,var(--green) 70%,var(--yellow) 70%,var(--yellow) 90%,var(--red) 90%);transition:width 50ms ease-out}
+  .vu-label{font-size:11px;color:var(--text-dim);margin-top:4px;font-family:ui-monospace,monospace;font-variant-numeric:tabular-nums}
   .toggle-script-btn.active{background:linear-gradient(180deg,var(--primary),var(--primary));color:#0a1f12;border-color:var(--primary);box-shadow:0 4px 14px rgba(46,204,113,.35)}
   .play-btn{background:var(--card);border:1px solid var(--border);color:var(--text);padding:8px 14px;border-radius:8px;font-family:inherit;cursor:pointer;font-size:13px}
   .play-btn:hover{border-color:var(--green)}
@@ -160,7 +164,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.2.2-model-inspector</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.2.3-vu-meter</div>
 
 <div class="app">
 
@@ -201,6 +205,10 @@
       <span class="mic-dot"></span>
       <span id="micLabel">Start reciting</span>
     </button>
+    <div class="vu-meter" id="vuMeter" title="Real-time mic level (red = clipping, green = good)">
+      <div class="vu-bar" id="vuBar"></div>
+      <div class="vu-label" id="vuLabel">0%</div>
+    </div>
     <button class="toggle-script-btn" id="toggleScriptBtn" title="Toggle the visible mushaf text">Hide Script</button>
     <label class="gain-label" title="Software mic gain (1x = unity, 4x = +12dB)">🎤 Gain: <input type="range" id="gainSlider" min="0.5" max="6" step="0.1" value="2" /> <span id="gainValue">2.0x</span></label>
     <label class="gain-label" title="High-pass filter (remove low-freq rumble, recommend ON)">🔇 HP: <input type="checkbox" id="hpToggle" checked /> <span id="hpValue">ON</span></label>
@@ -1031,6 +1039,18 @@ async function startListening(){
     wsProcessorNode.onaudioprocess = (event) => {
       if(!listening) return;
       const input = event.inputBuffer.getChannelData(0);
+      // Live VU meter update — show input level BEFORE gain (so user knows raw mic level)
+      let inputRms = 0;
+      for(let i = 0; i < input.length; i++) inputRms += input[i] * input[i];
+      inputRms = Math.sqrt(inputRms / input.length);
+      const dbRaw = 20 * Math.log10(inputRms + 1e-6);
+      // -60dB (silence) to 0dB (clipping) → 0% to 100%
+      const vuPct = Math.max(0, Math.min(100, ((dbRaw + 60) / 60) * 100));
+      const vuBar = document.getElementById('vuBar');
+      const vuLbl = document.getElementById('vuLabel');
+      if(vuBar) vuBar.style.setProperty('--vu-width', vuPct + '%');
+      if(vuLbl) vuLbl.textContent = `${vuPct.toFixed(0)}% (${dbRaw.toFixed(0)}dB)`;
+
       // Resample to 16kHz for FastConformer
       const resampled = resampleTo16k(input, wsAudioContext.sampleRate);
       wsChunkBuffer.push(...resampled);
