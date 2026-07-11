@@ -157,7 +157,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.1-auto-detect</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.2-debug-logging</div>
 
 <div class="app">
 
@@ -947,16 +947,23 @@ async function startListening(){
     return;
   }
 
-  // Connect WebSocket
+  // Connect WebSocket — verbose debug logging
+  console.log('[hafiz] Connecting to WebSocket:', backendUrl);
+  console.log('[hafiz] Page origin:', window.location.origin, 'protocol:', window.location.protocol);
+  statusEl.textContent = 'Connecting to ' + backendUrl + ' ...';
+  statusEl.classList.add('warn');
   try{
     ws = new WebSocket(backendUrl);
+    console.log('[hafiz] WebSocket object created, readyState:', ws.readyState);
   }catch(err){
-    statusEl.textContent = 'Invalid WebSocket URL: ' + backendUrl + '. Reload to re-enter.';
+    console.error('[hafiz] WebSocket constructor threw:', err);
+    statusEl.textContent = 'Invalid WebSocket URL: ' + backendUrl + ' — ' + (err.message || err);
     statusEl.classList.add('warn');
     return;
   }
 
   ws.onopen = async () => {
+    console.log('[hafiz] WebSocket OPEN — connected to backend');
     statusEl.textContent = 'Connected to FastConformer backend. Requesting microphone...';
     // Now get the mic
     try{
@@ -1026,15 +1033,17 @@ async function startListening(){
   };
 
   ws.onerror = (err) => {
-    statusEl.textContent = 'WebSocket error — backend may be unreachable. Check the URL in localStorage (quran_fastconformer_backend_url).';
+    console.error('[hafiz] WebSocket ERROR event:', err);
+    console.error('[hafiz] URL was:', backendUrl, 'readyState:', ws.readyState);
+    statusEl.textContent = 'WebSocket error connecting to ' + backendUrl + '. Check F12 console for details.';
     statusEl.classList.add('warn');
-    console.error('WS error:', err);
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
+    console.log('[hafiz] WebSocket CLOSED. code:', event.code, 'reason:', event.reason, 'wasClean:', event.wasClean);
     if(listening){
       // Unexpected close
-      statusEl.textContent = 'Disconnected from backend.';
+      statusEl.textContent = 'Disconnected from backend (code ' + event.code + '). ' + (event.reason || '');
     }
   };
 
