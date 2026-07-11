@@ -160,7 +160,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.2.1-play-test-audio</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.2.2-model-inspector</div>
 
 <div class="app">
 
@@ -207,6 +207,7 @@
     <button class="toggle-script-btn" id="debugBtn" title="Download the last audio chunks the backend received (debug)">⬇ Debug Audio</button>
     <button class="toggle-script-btn" id="testMicBtn" title="Record 3s and play it back so you can hear what the mic is capturing">🎤 Test Mic</button>
     <button class="toggle-script-btn" id="playTestBtn" title="Play a known-good Bismillah audio so you can test the model with a real Quran recitation (laptop speakers → mic → model)">🔊 Play Test Audio</button>
+    <button class="toggle-script-btn" id="toggleInspectorBtn" title="Show or hide the Live Model Inspector (always on by default)">👁 Toggle Inspector</button>
     <button class="toggle-script-btn" id="settingsBtn" title="Change the FastConformer backend URL">⚙ Settings</button>
     <span class="status" id="status">Pick a surah above first.</span>
   </div>
@@ -221,9 +222,10 @@
   <div id="ayahContainer"></div>
 
   <div class="transcript-box hidden" id="transcriptBox">
-    <span class="label">Live transcript (from Chrome Speech Recognition)</span>
+    <span class="label">📡 Live Model Inspector (what the FastConformer ASR is returning)</span>
     <div class="text" id="transcriptText"></div>
     <div class="conf" id="transcriptConf"></div>
+    <div class="model-stats" id="modelStats" style="font-size:11px;color:var(--text-dim);margin-top:6px;font-family:ui-monospace,monospace"></div>
   </div>
 </section>
 
@@ -1173,8 +1175,31 @@ function resampleTo16k(input, sourceSampleRate){
 }
 
 // Push backend transcript into the existing matcher pipeline
+let lastModelResponseAt = 0;
+let modelResponseCount = 0;
+let modelEmptyResponseCount = 0;
+let modelLastEmptyAt = 0;
 function flushTranscriptToMatcher(fullText){
-  if(!fullText || !fullText.trim()) return;
+  const now = Date.now();
+  modelResponseCount++;
+  if(lastModelResponseAt > 0){
+    const gap = ((now - lastModelResponseAt) / 1000).toFixed(1);
+    document.getElementById('modelStats').textContent =
+      `Responses: ${modelResponseCount} | Empty: ${modelEmptyResponseCount} | Last gap: ${gap}s | ${new Date().toLocaleTimeString()}`;
+  } else {
+    document.getElementById('modelStats').textContent = `First response: ${new Date().toLocaleTimeString()}`;
+  }
+  lastModelResponseAt = now;
+
+  if(!fullText || !fullText.trim()){
+    modelEmptyResponseCount++;
+    modelLastEmptyAt = now;
+    // Show empty state so user knows model is being queried but returning nothing
+    transcriptBox.classList.remove('hidden');
+    transcriptText.innerHTML = '<i style="color:var(--text-dim)">⏳ Model running, but no Quran Arabic detected. Try reciting louder/closer or use the 🔊 Play Test Audio button.</i>';
+    transcriptConf.textContent = `FastConformer Quran — last ${modelEmptyResponseCount} responses were empty`;
+    return;
+  }
 
   transcriptBox.classList.remove('hidden');
   transcriptText.textContent = fullText.trim();
@@ -1308,6 +1333,17 @@ document.getElementById('playTestBtn').addEventListener('click', async () => {
     btn.textContent = '🔊 Play Test Audio';
   }
 });
+
+// === Toggle the Live Model Inspector visibility ===
+document.getElementById('toggleInspectorBtn').addEventListener('click', () => {
+  const box = document.getElementById('transcriptBox');
+  if(box.classList.contains('hidden')){
+    box.classList.remove('hidden');
+  } else {
+    box.classList.add('hidden');
+  }
+});
+
 let testMicStream = null;
 let testMicContext = null;
 document.getElementById('testMicBtn').addEventListener('click', async () => {
