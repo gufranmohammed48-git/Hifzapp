@@ -157,7 +157,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.3-auto-fix-ws</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.4-debug-streaming</div>
 
 <div class="app">
 
@@ -1010,15 +1010,23 @@ async function startListening(){
       const resampled = resampleTo16k(input, wsAudioContext.sampleRate);
       wsChunkBuffer.push(...resampled);
       // Send ~1 second chunks
+      let chunksSent = 0;
       while(wsChunkBuffer.length >= WS_CHUNK_SAMPLES){
         const chunk = new Int16Array(WS_CHUNK_SAMPLES);
+        let sum = 0;
         for(let i = 0; i < WS_CHUNK_SAMPLES; i++){
           const s = Math.max(-1, Math.min(1, wsChunkBuffer[i]));
           chunk[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          sum += Math.abs(s);
         }
         wsChunkBuffer = wsChunkBuffer.slice(WS_CHUNK_SAMPLES);
+        const rms = sum / WS_CHUNK_SAMPLES;
+        chunksSent++;
         if(ws && ws.readyState === WebSocket.OPEN){
           ws.send(chunk.buffer);  // binary frame
+          console.log(`[hafiz] Sent 1s chunk #${chunksSent} (rms=${rms.toFixed(4)})`);
+        } else {
+          console.warn(`[hafiz] Chunk ready but WS not open (readyState=${ws ? ws.readyState : 'null'})`);
         }
       }
     };
@@ -1029,21 +1037,28 @@ async function startListening(){
     statusEl.classList.remove('warn');
     statusEl.textContent = 'Streaming live — recite naturally. First chunk may take 1-3s, then real-time.';
     noSpeechStreak = 0;
+    console.log('[hafiz] Mic connected, starting audio capture. Sample rate:', wsAudioContext.sampleRate);
   };
 
   ws.onmessage = (event) => {
     try{
       const data = JSON.parse(event.data);
+      console.log('[hafiz] WS received:', data);
       if(data.type === 'partial'){
-        flushTranscriptToMatcher(data.full_text || data.text || '');
+        const t = data.full_text || data.text || '';
+        statusEl.textContent = 'Live: ' + (t || '(silence)') + ' — waiting for words…';
+        flushTranscriptToMatcher(t);
       } else if(data.type === 'final'){
-        flushTranscriptToMatcher(data.text || '');
+        const t = data.text || '';
+        statusEl.textContent = 'Final: ' + (t || '(silence)');
+        flushTranscriptToMatcher(t);
       } else if(data.type === 'error'){
         statusEl.textContent = 'Backend error: ' + (data.message || 'unknown');
         statusEl.classList.add('warn');
+        console.error('[hafiz] Backend error:', data.message);
       }
     }catch(e){
-      console.warn('Bad WS message:', event.data);
+      console.warn('Bad WS message:', event.data, e);
     }
   };
 
