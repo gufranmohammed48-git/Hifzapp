@@ -1341,10 +1341,19 @@ document.getElementById('testMicBtn').addEventListener('click', async () => {
       testMicStream.getTracks().forEach(t => t.stop());
       testMicStream = null;
 
-      // Compute stats
-      const rms = Math.sqrt(audio.reduce((a,b)=>a+b*b,0) / audio.length);
-      const peak = Math.max(...audio.map(Math.abs));
+      // Compute stats (avoid Math.max(...arr) on 48k-sample array — stack overflow!)
+      let peak = 0;
+      let sumSq = 0;
+      for(let i = 0; i < audio.length; i++){
+        const a = Math.abs(audio[i]);
+        if(a > peak) peak = a;
+        sumSq += audio[i] * audio[i];
+      }
+      const rms = Math.sqrt(sumSq / audio.length);
       console.log(`[hafiz] Test mic captured: ${(audio.length/testMicContext.sampleRate).toFixed(2)}s, RMS=${rms.toFixed(4)}, peak=${peak.toFixed(4)}`);
+      if(rms < 0.001){
+        console.warn(`[hafiz] ⚠️ Mic captured almost-silent audio (RMS=${rms.toFixed(4)}). Check macOS Sound > Input volume or pick a different mic.`);
+      }
 
       // Play back
       const playbackCtx = new AudioContext();
