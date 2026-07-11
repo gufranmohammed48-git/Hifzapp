@@ -160,7 +160,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.6-mic-gain-slider</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.7-debug-download</div>
 
 <div class="app">
 
@@ -203,6 +203,7 @@
     </button>
     <button class="toggle-script-btn" id="toggleScriptBtn" title="Toggle the visible mushaf text">Hide Script</button>
     <label class="gain-label" title="Software mic gain (1x = unity, 4x = +12dB)">🎤 Gain: <input type="range" id="gainSlider" min="0.5" max="6" step="0.1" value="2" /> <span id="gainValue">2.0x</span></label>
+    <button class="toggle-script-btn" id="debugBtn" title="Download the last audio chunks the backend received (debug)">⬇ Debug Audio</button>
     <button class="toggle-script-btn" id="settingsBtn" title="Change the FastConformer backend URL">⚙ Settings</button>
     <span class="status" id="status">Pick a surah above first.</span>
   </div>
@@ -1256,6 +1257,37 @@ if(!isNaN(savedGain) && savedGain >= 0.5 && savedGain <= 6){
   gainSlider.value = String(savedGain);
   gainValue.textContent = savedGain.toFixed(1) + 'x';
 }
+
+// Debug audio download — fetch the backend's saved chunks as a zip
+document.getElementById('debugBtn').addEventListener('click', async () => {
+  const backendUrl = getBackendUrl();
+  if(!backendUrl){
+    alert('No backend URL set.');
+    return;
+  }
+  // Convert ws://host:port/path → http://host:port/api/debug-audio
+  const httpUrl = backendUrl.replace(/^ws/, 'http').replace(/\/ws$/, '') + '/api/debug-audio';
+  console.log(`[hafiz] Fetching debug audio: ${httpUrl}`);
+  try {
+    const resp = await fetch(httpUrl);
+    if(!resp.ok){
+      const txt = await resp.text();
+      alert('Debug fetch failed: ' + resp.status + ' ' + txt);
+      return;
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'debug_chunks.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    console.log(`[hafiz] Downloaded ${blob.size} bytes of debug audio`);
+  } catch(e){
+    alert('Debug fetch error: ' + e.message);
+    console.error(e);
+  }
+});
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   // Stop recognition first if it's still running (state may be inconsistent)
