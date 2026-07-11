@@ -160,7 +160,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.9-test-mic-vu</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.2.0-no-noise-suppress</div>
 
 <div class="app">
 
@@ -995,8 +995,17 @@ async function startListening(){
     statusEl.textContent = 'Connected to FastConformer backend. Requesting microphone...';
     // Now get the mic
     try{
+      // IMPORTANT: echoCancellation/noiseSuppression/autoGainControl OFF!
+      // Chrome's noise suppression was filtering out the user's Quran recitation
+      // (it treats sung/chanted audio as 'noise'). Test Mic with these OFF works;
+      // live tracking with these ON doesn't capture the voice.
       wsMediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}
+        audio: {
+          channelCount: 1,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
       });
     }catch(err){
       let msg = 'Mic access denied: ' + (err.message || err.name);
