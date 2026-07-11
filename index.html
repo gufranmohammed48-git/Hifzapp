@@ -164,7 +164,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.2.3-vu-meter</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.3.0-whisper-backend</div>
 
 <div class="app">
 
@@ -216,6 +216,7 @@
     <button class="toggle-script-btn" id="testMicBtn" title="Record 3s and play it back so you can hear what the mic is capturing">🎤 Test Mic</button>
     <button class="toggle-script-btn" id="playTestBtn" title="Play a known-good Bismillah audio so you can test the model with a real Quran recitation (laptop speakers → mic → model)">🔊 Play Test Audio</button>
     <button class="toggle-script-btn" id="toggleInspectorBtn" title="Show or hide the Live Model Inspector (always on by default)">👁 Toggle Inspector</button>
+    <label class="gain-label" title="Choose ASR backend: FastConformer is fast but only Alafasy-style; Whisper is slower but handles all Arabic reciters">🧠 Model: <select id="modelSelect"><option value="whisper" selected>Whisper (all voices)</option><option value="fastconformer">FastConformer (fast)</option></select></label>
     <button class="toggle-script-btn" id="settingsBtn" title="Change the FastConformer backend URL">⚙ Settings</button>
     <span class="status" id="status">Pick a surah above first.</span>
   </div>
@@ -936,15 +937,24 @@ let wsMicGain = 2.0;    // software mic gain multiplier (1.0 = unity, 2.0 = +6dB
 // Initialize or get backend URL — auto-detect from same-origin
 function ensureBackendUrl(){
   let url = getBackendUrl();
+  const model = getModelBackend();
+  const pathSuffix = model === 'whisper' ? '/ws/whisper' : '/ws';
   if(!url){
     // If the page itself is served from the backend, use same-origin WS — no prompt needed
     const pageProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const sameOriginUrl = pageProto + '//' + window.location.host + '/ws';
+    const sameOriginUrl = pageProto + '//' + window.location.host + pathSuffix;
     setBackendUrl(sameOriginUrl);
     return sameOriginUrl;
   }
   // Always normalize on read too — fixes double-slash from older sessions
-  return normalizeBackendUrl(getBackendUrl());
+  let normalized = normalizeBackendUrl(url);
+  // If user changed model, swap /ws for /ws/whisper or vice versa
+  if(model === 'whisper' && !normalized.endsWith('/ws/whisper')){
+    normalized = normalized.replace(/\/ws$/, '/ws/whisper');
+  } else if(model === 'fastconformer' && normalized.endsWith('/ws/whisper')){
+    normalized = normalized.replace(/\/ws\/whisper$/, '/ws');
+  }
+  return normalized;
 }
 
 // Strip trailing slashes, ensure /ws suffix, convert http(s) → ws(s)
@@ -1364,6 +1374,19 @@ document.getElementById('toggleInspectorBtn').addEventListener('click', () => {
   }
 });
 
+// === Model backend selector (Whisper or FastConformer) ===
+function getModelBackend(){
+  return localStorage.getItem('hafiz_model_backend') || 'whisper';
+}
+const modelSelect = document.getElementById('modelSelect');
+modelSelect.value = getModelBackend();
+modelSelect.addEventListener('change', (e) => {
+  localStorage.setItem('hafiz_model_backend', e.target.value);
+  console.log(`[hafiz] Model backend: ${e.target.value}`);
+  // Reset the cached backend URL so ensureBackendUrl re-resolves with the new path
+  setBackendUrl(null);
+});
+
 let testMicStream = null;
 let testMicContext = null;
 document.getElementById('testMicBtn').addEventListener('click', async () => {
@@ -1475,8 +1498,11 @@ document.getElementById('debugBtn').addEventListener('click', async () => {
     alert('No backend URL set.');
     return;
   }
-  // Convert ws://host:port/path → http://host:port/api/debug-audio
-  const httpUrl = backendUrl.replace(/^ws/, 'http').replace(/\/ws$/, '') + '/api/debug-audio';
+  // Convert ws://host:port/path/whisper → http://host:port/api/debug-audio
+  let httpUrl = backendUrl.replace(/^ws/, 'http');
+  // Strip /ws or /ws/whisper
+  httpUrl = httpUrl.replace(/\/ws\/whisper$/, '').replace(/\/ws$/, '');
+  httpUrl = httpUrl + '/api/debug-audio';
   console.log(`[hafiz] Fetching debug audio: ${httpUrl}`);
   try {
     const resp = await fetch(httpUrl);
