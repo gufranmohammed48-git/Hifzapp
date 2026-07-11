@@ -1320,7 +1320,7 @@ document.getElementById('testMicBtn').addEventListener('click', async () => {
       const rms = Math.sqrt(chunk.reduce((a,b)=>a+b*b,0) / chunk.length);
       const db = 20 * Math.log10(rms + 1e-6);
       const vu = Math.max(0, Math.min(100, (db + 60) * 100 / 60));  // -60dB..0dB → 0..100
-      btn.textContent = `🔴 ${vu.toFixed(0)}% (${(Date.now()-recordStart)/1000).toFixed(1)}s)`;
+      btn.textContent = `🔴 ${vu.toFixed(0)}% (${((Date.now()-recordStart)/1000).toFixed(1)}s)`;
       if(Date.now() - recordStart < RECORD_MS){
         recordedChunks.push(new Float32Array(chunk));
       }
