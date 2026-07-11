@@ -157,7 +157,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.4-debug-streaming</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.5-quiet-mic-warning</div>
 
 <div class="app">
 
@@ -907,7 +907,11 @@ let wsAudioContext = null;
 let wsMediaStream = null;
 let wsProcessorNode = null;
 let wsChunkBuffer = [];  // accumulate samples until we have ~1 second worth
+let wsChunksSent = 0;    // counter for sent chunks (was being reset to 0 inside the callback — bug)
+let wsFirstChunkAt = null;  // ms timestamp of first sent chunk
+let wsLastRmsWarningAt = 0;  // throttle RMS-too-low warnings
 const WS_CHUNK_SAMPLES = 16000; // 1 second at 16kHz
+const WS_RMS_QUIET_THRESHOLD = 0.005;  // below this for sustained period → warn user
 
 // Initialize or get backend URL — auto-detect from same-origin
 function ensureBackendUrl(){
@@ -1010,7 +1014,6 @@ async function startListening(){
       const resampled = resampleTo16k(input, wsAudioContext.sampleRate);
       wsChunkBuffer.push(...resampled);
       // Send ~1 second chunks
-      let chunksSent = 0;
       while(wsChunkBuffer.length >= WS_CHUNK_SAMPLES){
         const chunk = new Int16Array(WS_CHUNK_SAMPLES);
         let sum = 0;
@@ -1021,10 +1024,18 @@ async function startListening(){
         }
         wsChunkBuffer = wsChunkBuffer.slice(WS_CHUNK_SAMPLES);
         const rms = sum / WS_CHUNK_SAMPLES;
-        chunksSent++;
+        wsChunksSent++;
         if(ws && ws.readyState === WebSocket.OPEN){
           ws.send(chunk.buffer);  // binary frame
-          console.log(`[hafiz] Sent 1s chunk #${chunksSent} (rms=${rms.toFixed(4)})`);
+          console.log(`[hafiz] Sent 1s chunk #${wsChunksSent} (rms=${rms.toFixed(4)})`);
+          // RMS-too-low warning: throttled to once per 5s
+          if(rms < WS_RMS_QUIET_THRESHOLD && Date.now() - wsLastRmsWarningAt > 5000){
+            console.warn(`[hafiz] ⚠️ Mic RMS=${rms.toFixed(4)} is near-silence. Boost input volume / move closer to mic.`);
+            wsLastRmsWarningAt = Date.now();
+            // Surface this on the UI too
+            const banner = document.getElementById('recStatus');
+            if(banner) banner.textContent = '⚠️ Mic too quiet — boost input volume';
+          }
         } else {
           console.warn(`[hafiz] Chunk ready but WS not open (readyState=${ws ? ws.readyState : 'null'})`);
         }
