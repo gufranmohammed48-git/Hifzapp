@@ -157,7 +157,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.0.9-https-aware</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.1-auto-detect</div>
 
 <div class="app">
 
@@ -894,27 +894,15 @@ let wsProcessorNode = null;
 let wsChunkBuffer = [];  // accumulate samples until we have ~1 second worth
 const WS_CHUNK_SAMPLES = 16000; // 1 second at 16kHz
 
-// Initialize or get backend URL via prompt on first run
+// Initialize or get backend URL — auto-detect from same-origin
 function ensureBackendUrl(){
   let url = getBackendUrl();
   if(!url){
-    const isHttps = window.location.protocol === 'https:';
-    const defaultUrl = isHttps
-      ? 'wss://suzuki-microwave-instrumentation-registration.trycloudflare.com/ws'
-      : 'ws://167.99.116.58/ws';
-    url = prompt(
-      'Enter your FastConformer backend WebSocket URL\n' +
-      '(default: ' + defaultUrl + ')\n' +
-      '\n' +
-      'MUST use wss:// (not ws://) if this page is loaded over HTTPS.\n' +
-      'Append "/ws" to the URL.\n' +
-      '\n' +
-      'Stored in localStorage so you only enter it once.'
-    );
-    if(url){
-      url = url.trim();
-      setBackendUrl(normalizeBackendUrl(url));
-    }
+    // If the page itself is served from the backend, use same-origin WS — no prompt needed
+    const pageProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const sameOriginUrl = pageProto + '//' + window.location.host + '/ws';
+    setBackendUrl(sameOriginUrl);
+    return sameOriginUrl;
   }
   // Always normalize on read too — fixes double-slash from older sessions
   return normalizeBackendUrl(getBackendUrl());
@@ -1180,7 +1168,7 @@ micBtn.addEventListener('click', () => {
 // Settings button — change backend URL
 document.getElementById('settingsBtn').addEventListener('click', () => {
   const current = getBackendUrl();
-  const url = prompt('FastConformer backend WebSocket URL:', current || 'wss://suzuki-microwave-instrumentation-registration.trycloudflare.com/ws');
+  const url = prompt('FastConformer backend WebSocket URL:', current || 'ws://167.99.116.58/ws');
   if(url && url.trim()){
     const cleaned = normalizeBackendUrl(url);
     setBackendUrl(cleaned);
