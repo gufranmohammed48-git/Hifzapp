@@ -160,7 +160,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.7-debug-download</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.1.8-hpf-no-rumble</div>
 
 <div class="app">
 
@@ -203,6 +203,7 @@
     </button>
     <button class="toggle-script-btn" id="toggleScriptBtn" title="Toggle the visible mushaf text">Hide Script</button>
     <label class="gain-label" title="Software mic gain (1x = unity, 4x = +12dB)">🎤 Gain: <input type="range" id="gainSlider" min="0.5" max="6" step="0.1" value="2" /> <span id="gainValue">2.0x</span></label>
+    <label class="gain-label" title="High-pass filter (remove low-freq rumble, recommend ON)">🔇 HP: <input type="checkbox" id="hpToggle" checked /> <span id="hpValue">ON</span></label>
     <button class="toggle-script-btn" id="debugBtn" title="Download the last audio chunks the backend received (debug)">⬇ Debug Audio</button>
     <button class="toggle-script-btn" id="settingsBtn" title="Change the FastConformer backend URL">⚙ Settings</button>
     <span class="status" id="status">Pick a surah above first.</span>
@@ -1127,6 +1128,20 @@ async function startListening(){
 }
 
 // Linear interpolation resampler — FastConformer needs 16kHz
+// High-pass filter state (removes low-frequency rumble < 100Hz)
+// y[n] = a*(y[n-1] + x[n] - x[n-1])  with a = RC / (RC + dt), RC = 1/(2*pi*100Hz)
+let hpPrevX = 0;
+let hpPrevY = 0;
+let hpEnabled = true;
+const HP_ALPHA = 1 / (1 + 2 * Math.PI * 100 / 16000);  // for fs=16kHz
+function highPass(x){
+  if(!hpEnabled) return x;
+  const y = HP_ALPHA * (hpPrevY + x - hpPrevX);
+  hpPrevX = x;
+  hpPrevY = y;
+  return y;
+}
+
 function resampleTo16k(input, sourceSampleRate){
   if(sourceSampleRate === 16000) return Array.from(input);
   const ratio = 16000 / sourceSampleRate;
@@ -1138,6 +1153,10 @@ function resampleTo16k(input, sourceSampleRate){
     const hi = Math.min(lo + 1, input.length - 1);
     const t = srcIdx - lo;
     output[i] = input[lo] * (1 - t) + input[hi] * t;
+  }
+  // Apply high-pass filter to remove low-freq rumble
+  for(let i = 0; i < output.length; i++){
+    output[i] = highPass(output[i]);
   }
   return output;
 }
@@ -1195,22 +1214,8 @@ function stopListening(){
     wsMediaStream = null;
   }
 
-  // Vosk cleanup
-  if(voskRecognitionActive){
-    voskRecognitionActive = false;
-    if(voskProcessorNode){
-      try{ voskProcessorNode.disconnect(); }catch(_){}
-      try{ voskProcessorNode.onaudioprocess = null; }catch(_){}
-      voskProcessorNode = null;
-    }
-    if(voskAudioContext && voskAudioContext.state !== 'closed'){
-      voskAudioContext.close().catch(()=>{});
-    }
-    if(voskMediaStream){
-      voskMediaStream.getTracks().forEach(t => t.stop());
-      voskMediaStream = null;
-    }
-  }
+  // Vosk cleanup — REMOVED in v1.1.8 (this is FastConformer-only variant, no Vosk code path)
+  // (Was: if(voskRecognitionActive){...} which threw ReferenceError since var is undefined)
 
   // webkitSpeechRecognition cleanup
   if(recognition){ try{ recognition.stop(); }catch(_){} }
@@ -1257,6 +1262,14 @@ if(!isNaN(savedGain) && savedGain >= 0.5 && savedGain <= 6){
   gainSlider.value = String(savedGain);
   gainValue.textContent = savedGain.toFixed(1) + 'x';
 }
+
+// High-pass filter toggle
+document.getElementById('hpToggle').addEventListener('change', (e) => {
+  hpEnabled = e.target.checked;
+  document.getElementById('hpValue').textContent = hpEnabled ? 'ON' : 'OFF';
+  hpPrevX = 0; hpPrevY = 0;  // reset filter state
+  console.log(`[hafiz] High-pass filter: ${hpEnabled ? 'ON' : 'OFF'}`);
+});
 
 // Debug audio download — fetch the backend's saved chunks as a zip
 document.getElementById('debugBtn').addEventListener('click', async () => {
