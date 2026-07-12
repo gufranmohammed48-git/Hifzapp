@@ -120,9 +120,18 @@
   .toggle-script-btn{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(180deg,var(--card),var(--card-hover));color:var(--text);border:1px solid var(--border);font-size:13px;font-weight:600;padding:10px 18px;border-radius:30px;cursor:pointer;font-family:inherit;transition:all .15s ease}
   .toggle-script-btn:hover{transform:translateY(-1px);border-color:var(--primary);color:var(--primary);box-shadow:0 4px 14px rgba(46,204,113,.28)}
   .toggle-script-btn:active{transform:translateY(0);box-shadow:0 2px 8px rgba(46,204,113,.2)}
-  .gain-label{display:inline-flex;align-items:center;gap:6px;background:var(--card);color:var(--text);border:1px solid var(--border);font-size:12px;font-weight:600;padding:6px 14px;border-radius:30px;font-family:inherit}
+  .gain-label{display:inline-flex;align-items:center;gap:6px;background:var(--card);color:var(--text);border:1px solid var(--border);font-size:12px;font-weight:600;padding:6px 14px;border-radius:30px;font-family:inherit;position:relative}
   .gain-label input[type=range]{width:80px;accent-color:var(--primary);cursor:pointer}
   .gain-label #gainValue{min-width:32px;text-align:right;color:var(--primary);font-variant-numeric:tabular-nums}
+  .info-btn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--border);color:var(--text-dim);font-size:11px;font-weight:700;cursor:pointer;border:none;padding:0;line-height:1;transition:all .15s ease;font-family:inherit}
+  .info-btn:hover{background:var(--primary);color:#fff;transform:scale(1.1)}
+  .gain-popover{position:absolute;top:calc(100% + 10px);right:0;width:280px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.5;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:200;text-align:left;font-weight:500;cursor:default}
+  .gain-popover.hidden{display:none}
+  .gain-popover h4{margin:0 0 8px;font-size:13px;color:var(--primary);font-weight:700}
+  .gain-popover p{margin:6px 0;color:var(--text)}
+  .gain-popover .range-row{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--bg);border-radius:6px;margin:4px 0;font-variant-numeric:tabular-nums}
+  .gain-popover .range-row .v{color:var(--primary);font-weight:700}
+  .gain-popover .tip{margin-top:10px;padding:8px 10px;background:var(--primary-soft);border-left:3px solid var(--primary);border-radius:4px;color:var(--text);font-size:11px}
   .vu-meter{display:inline-flex;flex-direction:column;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 14px;min-width:200px}
   .vu-bar{width:100%;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;position:relative}
   .vu-bar::before{content:'';position:absolute;left:0;top:0;bottom:0;width:var(--vu-width,0%);background:linear-gradient(90deg,var(--green) 0%,var(--green) 70%,var(--yellow) 70%,var(--yellow) 90%,var(--red) 90%);transition:width 50ms ease-out}
@@ -169,7 +178,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.5.1-fix-boot</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.5.2-gain-info</div>
 
 <div class="app">
 
@@ -213,7 +222,19 @@
       <div class="vu-label" id="vuLabel">0%</div>
     </div>
     <button class="toggle-script-btn" id="toggleScriptBtn" title="Toggle the visible mushaf text">Hide Script</button>
-    <label class="gain-label" title="Software mic gain (1x = unity, 4x = +12dB)">🎤 Gain: <input type="range" id="gainSlider" min="0.5" max="6" step="0.1" value="2" /> <span id="gainValue">2.0x</span></label>
+    <label class="gain-label" title="Software mic gain (1x = unity, 4x = +12dB)">🎤 Gain: <input type="range" id="gainSlider" min="0.5" max="6" step="0.1" value="2" /> <span id="gainValue">2.0x</span><button type="button" class="info-btn" id="gainInfoBtn" title="What does this do?" aria-label="Gain slider info">i</button>
+    <div class="gain-popover hidden" id="gainPopover">
+      <h4>🎤 What does the Gain slider do?</h4>
+      <p>It <b>amplifies your microphone audio</b> in the browser, before sending it to the ASR model. The model's recognition quality depends heavily on having a clean, loud enough signal.</p>
+      <div class="range-row"><span>0.5x</span><span class="v">−6 dB</span></div>
+      <div class="range-row"><span>1.0x</span><span class="v">unity</span></div>
+      <div class="range-row"><span>2.0x</span><span class="v">+6 dB</span></div>
+      <div class="range-row"><span>4.0x</span><span class="v">+12 dB</span></div>
+      <div class="range-row"><span>6.0x</span><span class="v">+15 dB</span></div>
+      <div class="tip"><b>How to set it:</b> Watch the VU meter. While reciting, it should hover in the <b style="color:var(--primary)">green zone (20–60%)</b>. If it's stuck near 0%, slide up. If it pins at 100% and words come out wrong, slide down. Default 2.0x works for most people.</div>
+      <p style="margin-top:10px;font-size:11px;color:var(--text-dim)">Click anywhere outside this box to close.</p>
+    </div>
+    </label>
     <span class="status" id="status">Pick a surah above first.</span>
   </div>
 
@@ -1336,6 +1357,27 @@ if(!isNaN(savedGain) && savedGain >= 0.5 && savedGain <= 6){
   wsMicGain = savedGain;
   gainSlider.value = String(savedGain);
   gainValue.textContent = savedGain.toFixed(1) + 'x';
+}
+
+// Gain slider info popover
+const gainInfoBtn = document.getElementById('gainInfoBtn');
+const gainPopover = document.getElementById('gainPopover');
+if(gainInfoBtn && gainPopover){
+  gainInfoBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    gainPopover.classList.toggle('hidden');
+  });
+  // Click outside to close
+  document.addEventListener('click', (e) => {
+    if(!gainPopover.contains(e.target) && e.target !== gainInfoBtn){
+      gainPopover.classList.add('hidden');
+    }
+  });
+  // Escape to close
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape') gainPopover.classList.add('hidden');
+  });
 }
 
 // High-pass filter toggle (guard with null check — UI may not include this control)
