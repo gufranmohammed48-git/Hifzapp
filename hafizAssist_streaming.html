@@ -164,7 +164,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.4.0-fastconformer-quran-bucket</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.4.1-pointer-delta</div>
 
 <div class="app">
 
@@ -790,6 +790,7 @@ function resetState(){
   committedWordCount = 0;
   finalizedText = '';
   confidences = [];
+  lastProcessedFullText = '';  // reset delta tracker too
   renderDebugPanel();
   updateStats();
   transcriptBox.classList.add('hidden');
@@ -1096,6 +1097,10 @@ async function startListening(){
     micLabel.textContent = 'Listening (streaming)… tap to stop';
     statusEl.classList.remove('warn');
     statusEl.textContent = 'Streaming live — recite naturally. First chunk may take 1-3s, then real-time.';
+    // Reset the delta tracker so a new session starts clean
+    lastProcessedFullText = '';
+    modelResponseCount = 0;
+    modelEmptyResponseCount = 0;
     noSpeechStreak = 0;
     console.log('[hafiz] Mic connected, starting audio capture. Sample rate:', wsAudioContext.sampleRate);
   };
@@ -1200,6 +1205,7 @@ let lastModelResponseAt = 0;
 let modelResponseCount = 0;
 let modelEmptyResponseCount = 0;
 let modelLastEmptyAt = 0;
+let lastProcessedFullText = '';  // track what we've already processed so we only handle DELTAS
 function flushTranscriptToMatcher(fullText){
   const now = Date.now();
   modelResponseCount++;
@@ -1224,23 +1230,50 @@ function flushTranscriptToMatcher(fullText){
 
   transcriptBox.classList.remove('hidden');
   transcriptText.textContent = fullText.trim();
-  transcriptConf.textContent = 'FastConformer Quran (0.14% WER) — streaming';
+  transcriptConf.textContent = 'FastConformer Quran (4.13% WER) — streaming';
 
-  // Re-process every word on every backend update (same logic as Vosk version)
-  const words = fullText.trim().split(/\s+/).filter(Boolean);
-  for(let i = 0; i < refWords.length; i++){
-    refWords[i].el.dataset.status = '';
+  // CRITICAL FIX: only process the DELTA (new words) since the last response.
+  // Before this fix, every backend response reset pointer to 0 and reprocessed
+  // the WHOLE rolling buffer, so the pointer kept jumping back to verse 1
+  // every time the user advanced.
+  const newText = computeDelta(lastProcessedFullText, fullText.trim());
+  if(!newText){
+    // No new words since last response
+    highlightCurrent();
+    return;
   }
-  pointer = 0;
-  consecutiveMisses = 0;
-  stats = {correct:0, mistake:0, unclear:0};
-  debugLog = [];
+  lastProcessedFullText = fullText.trim();
+  const words = newText.split(/\s+/).filter(Boolean);
   for(let i = 0; i < words.length; i++){
     processNewWord(words[i]);
   }
   highlightCurrent();
   renderDebugPanel();
   updateStats();
+}
+
+// Find the NEW words at the end of newText that weren't in oldText.
+// We use prefix matching: if oldText is a prefix of newText, the delta is
+// just the suffix. If newText is a prefix of oldText (rolling buffer dropped
+// something), reset to that prefix and process the whole thing. Otherwise
+// (e.g. transcription corrected itself), reset and process the whole thing.
+function computeDelta(oldText, newText){
+  if(!oldText) return newText;
+  // oldText is a prefix of newText → just the suffix
+  if(newText.startsWith(oldText)){
+    return newText.slice(oldText.length).trim();
+  }
+  // newText is a prefix of oldText → rolling buffer dropped words; process all
+  if(oldText.startsWith(newText)){
+    return newText;
+  }
+  // newText is longer and oldText is a prefix → already handled above
+  // Otherwise: model corrected itself. Try to find longest common prefix
+  // with newText and treat everything after as new.
+  let common = 0;
+  const minLen = Math.min(oldText.length, newText.length);
+  while(common < minLen && oldText[common] === newText[common]) common++;
+  return newText.slice(common).trim();
 }
 
 // Stop listening — handles WebSocket (FastConformer), Vosk, and webkit paths
@@ -1571,6 +1604,9 @@ window.__matcher__ = {
       return;
     }
     renderSurahGrid('');
+    // AUTO-LOAD Surah 1 (Al-Fatihah) by default so the user can start reciting
+    // immediately without picking a chapter
+    selectSurah(1);
   }catch(e){
     console.error('boot failed:', e);
     statusEl.textContent = 'Failed to load phoneme data: ' + e.message;
