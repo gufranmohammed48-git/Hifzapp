@@ -1,9 +1,28 @@
-backend/
-mobile/
-web/
-screenshots/
+# Frontend repo (Hifzapp) — only HTML/JS assets are tracked.
+# Backend code lives in the SEPARATE HafizAssistant repo:
+# https://github.com/gufranmohammed48-git/HafizAssistant
+
+# Excluded folders — these are local development artifacts only
+backend/                # Python backend (tracked in HafizAssistant repo)
+mobile/                 # Mobile dev artifacts
+web/                    # Old web directory
+screenshots/            # Test screenshots
+
+# Python (defensive — backend is excluded above)
 __pycache__/
 *.pyc
 .venv/
 .env
+
+# Node
 node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
