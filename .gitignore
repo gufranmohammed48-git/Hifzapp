@@ -1,12 +1,21 @@
-# Frontend repo (Hifzapp) — only HTML/JS assets are tracked.
-# Backend code lives in the SEPARATE HafizAssistant repo:
-# https://github.com/gufranmohammed48-git/HafizAssistant
+# Hifzapp monorepo (LOCKED 2026-07-12) — frontend HTML/JS + backend Python
+# live in the same repo. Previously split across Hifzapp + HafizAssistant
+# repos; HafizAssistant is now archived and superseded.
 
-# Excluded folders — these are local development artifacts only
-backend/                # Python backend (tracked in HafizAssistant repo)
+# Excluded folders — local dev artifacts only
 mobile/                 # Mobile dev artifacts
 web/                    # Old web directory
 screenshots/            # Test screenshots
+
+# Backend heavy runtime artifacts (the backend/ .gitignore handles
+# Python/venv specifics, this catches anything that slips out)
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/debug_chunks/
+backend/*.wav
+backend/*.ogg
+backend/*.mp3
 
 # Python (defensive — backend is excluded above)
 __pycache__/
