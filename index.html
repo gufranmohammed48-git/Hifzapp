@@ -123,8 +123,8 @@
   .gain-label{display:inline-flex;align-items:center;gap:6px;background:var(--card);color:var(--text);border:1px solid var(--border);font-size:12px;font-weight:600;padding:6px 14px;border-radius:30px;font-family:inherit;position:relative}
   .gain-label input[type=range]{width:80px;accent-color:var(--primary);cursor:pointer}
   .gain-label #gainValue{min-width:32px;text-align:right;color:var(--primary);font-variant-numeric:tabular-nums}
-  .info-btn{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--primary);color:#fff;font-size:12px;font-weight:800;cursor:pointer;border:none;padding:0;line-height:1;transition:all .15s ease;font-family:inherit;box-shadow:0 0 0 2px var(--card),0 0 0 3px var(--primary);margin-left:2px}
-  .info-btn:hover{background:#fff;color:var(--primary);transform:scale(1.15);box-shadow:0 0 0 2px var(--card),0 0 0 3px var(--primary),0 4px 12px rgba(46,204,113,.5)}
+  .info-btn{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:800;cursor:pointer;border:1px solid rgba(46,204,113,.35);padding:0;line-height:1;transition:all .15s ease;font-family:inherit;margin-left:2px}
+  .info-btn:hover{background:var(--primary);color:#fff;border-color:var(--primary);transform:scale(1.1)}
   .gain-popover{position:absolute;top:calc(100% + 10px);right:0;width:280px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.5;color:var(--text);box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:200;text-align:left;font-weight:500;cursor:default}
   .gain-popover.hidden{display:none}
   .gain-popover h4{margin:0 0 8px;font-size:13px;color:var(--primary);font-weight:700}
@@ -178,7 +178,7 @@
 <body>
 
 <!-- VERSION BADGE — increment on every push so user can confirm fresh load -->
-<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.5.3-info-visible</div>
+<div class="version-badge" title="Increment on every change so you can verify your browser isn't loading a cached version">1.5.4-info-softer</div>
 
 <div class="app">
 
