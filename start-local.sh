@@ -43,7 +43,22 @@ echo "  (First time will take 5-10 minutes to download deps + model)"
 echo
 
 cd backend
+
+# Check for HF token (used to download the gated Muno459 model)
+if [ -f "hf_token.txt" ]; then
+  echo "  Found hf_token.txt — will use the gated Muno459 model (best quality)"
+else
+  echo "  No hf_token.txt found — will fall back to the public mohammed model"
+  echo "  (only works for Alafasy; other reciters won't match well)"
+  echo "  To use the best model: see backend/hf_token.txt.example"
+fi
+echo
+
 docker compose up -d --build
+if [ $? -ne 0 ]; then
+  echo "[ERROR] Docker compose failed. Check the output above."
+  exit 1
+fi
 cd ..
 
 echo

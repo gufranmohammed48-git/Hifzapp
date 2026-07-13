@@ -14,6 +14,11 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# Secrets — NEVER commit tokens
+hf_token.txt
+*.token
+secrets/
+
 # Distribution / packaging
 build/
 dist/

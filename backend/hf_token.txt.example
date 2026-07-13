@@ -1,0 +1,16 @@
+# HuggingFace read token (https://huggingface.co/settings/tokens)
+# 
+# To get the best Quran ASR model (Muno459/fastconformer-quran), you
+# need a HuggingFace read token AND you must accept the model's terms:
+#   1. Visit https://huggingface.co/Muno459/fastconformer-quran
+#   2. Click "Agree and access repository" (accepts the license)
+#   3. Create a read token at https://huggingface.co/settings/tokens
+#      (read-only is enough — no need to give it write access)
+#   4. Paste it on the line below and save as hf_token.txt (no .example)
+#
+# Example content of hf_token.txt:
+#   hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#
+# If you don't create this file, the build will fall back to the
+# public mohammed/fastconformer-quran-ar model (works for Alafasy but
+# not for other reciters).

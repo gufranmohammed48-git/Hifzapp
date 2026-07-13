@@ -29,10 +29,18 @@ services:
       context: .
       dockerfile: Dockerfile
       # Build args let you swap the model without editing the Dockerfile.
-      # Defaults match the production model shahabazkc10/fastconformer-quran-bucket.
+      # Defaults match the production model Muno459/fastconformer-quran
+      # (4.13% WER overall, 0.93% on held-out unseen reciters, includes
+      # diacritics). Muno459/fastconformer-quran is GATED — set
+      # HF_TOKEN env var (or use --build-arg HF_TOKEN=hf_xxx) to download.
+      # Falls back to public mohammed/fastconformer-quran-ar if not.
       args:
-        MODEL_REPO: shahabazkc10/fastconformer-quran-bucket
-        MODEL_FILENAME: fastconformer-quran.nemo
+        MODEL_REPO: Muno459/fastconformer-quran
+        MODEL_FILENAME: nemo/fastconformer-quran.nemo
+        FALLBACK_REPO: mohammed/fastconformer-quran-ar
+        FALLBACK_FILENAME: phase3_full_finetune/phase3_full_finetune_wer0.1432.nemo
+      secrets:
+        - hf_token
     image: fastconformer-quran:latest
     container_name: fastconformer
     restart: unless-stopped
@@ -72,6 +80,17 @@ services:
 volumes:
   model_data:
     name: fastconformer_model
+
+# Secrets — for accessing gated models on HuggingFace.
+# Create a file named hf_token.txt in the backend/ directory containing
+# your HuggingFace read token (https://huggingface.co/settings/tokens).
+# Then `docker compose up --build` will pass it to the Dockerfile.
+#
+# If you don't have a token, the build falls back to the public
+# mohammed/fastconformer-quran-ar model automatically.
+secrets:
+  hf_token:
+    file: ./hf_token.txt
 
 
 # ============================================================================
