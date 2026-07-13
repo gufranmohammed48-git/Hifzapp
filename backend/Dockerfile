@@ -24,7 +24,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy app code
 COPY app.py ./
-COPY whisper_transcribe.py ./
 
 # Download the FastConformer model at build time (cached in image).
 # Production model: shahabazkc10/fastconformer-quran-bucket (4.13% WER,
