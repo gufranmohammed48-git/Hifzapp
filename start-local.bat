@@ -54,7 +54,7 @@ if %errorlevel% neq 0 (
 cd ..
 
 echo.
-echo [2/4] Waiting for the backend to be healthy (up to 90s)...
+echo [2/4] Waiting for the backend to be healthy (up to 180s)...
 echo.
 
 set /a attempts=0
@@ -63,15 +63,20 @@ set /a attempts+=1
 curl -sf http://127.0.0.1:8080/healthz >nul 2>&1
 if %errorlevel% equ 0 goto ready
 
-if %attempts% geq 30 (
+if %attempts% geq 60 (
     echo.
-    echo [ERROR] Backend did not become healthy in 90s.
+    echo [ERROR] Backend did not become healthy in 180s.
+    echo Common causes:
+    echo   1. Model is still downloading ^(459MB, can take a few min^)
+    echo   2. Model is loading on slow CPU ^(60-90s on Intel UHD^)
+    echo   3. HF_TOKEN invalid - check hf_token.txt
+    echo.
     echo Check logs with:  cd backend ^&^& docker compose logs -f fastconformer
     pause
     exit /b 1
 )
 
-echo   waiting... (%attempts%/30)
+echo   waiting... (%attempts%/60)
 timeout /t 3 /nobreak >nul
 goto wait_loop
 

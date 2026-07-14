@@ -62,10 +62,10 @@ fi
 cd ..
 
 echo
-echo "[2/4] Waiting for the backend to be healthy (up to 90s)..."
+echo "[2/4] Waiting for the backend to be healthy (up to 180s)..."
 echo
 
-for i in {1..30}; do
+for i in {1..60}; do
   if curl -sf http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
     echo
     echo "[3/4] Backend is healthy!"
@@ -73,13 +73,18 @@ for i in {1..30}; do
     echo
     break
   fi
-  if [ "$i" -eq 30 ]; then
+  if [ "$i" -eq 60 ]; then
     echo
-    echo "[ERROR] Backend did not become healthy in 90s."
+    echo "[ERROR] Backend did not become healthy in 180s."
+    echo "Common causes:"
+    echo "  1. Model is still downloading (459MB, can take a few min)"
+    echo "  2. Model is loading on slow CPU (60-90s on Intel UHD)"
+    echo "  3. HF_TOKEN invalid - check hf_token.txt"
+    echo
     echo "Check logs with:  cd backend && docker compose logs -f fastconformer"
     exit 1
   fi
-  printf "  waiting... (%d/30)\n" "$i"
+  printf "  waiting... (%d/60)\n" "$i"
   sleep 3
 done
 
