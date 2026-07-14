@@ -15,7 +15,7 @@ WORKDIR /app
 # Install Python deps (cached separately from app code for faster rebuilds)
 # Cython + build tools MUST come BEFORE nemo_toolkit (youtokentome needs Cython) because youtokentome
 # (NeMo dep) needs to compile from source on Python 3.10.
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir cython setuptools wheel && \
     pip install --no-cache-dir --no-build-isolation -r requirements.txt && \
@@ -23,8 +23,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir 'pyarrow==13.0.0'
 
 # Copy app code
-COPY app.py ./
-COPY download_model.py ./
+COPY backend/app.py ./
+COPY backend/download_model.py ./
 
 # Copy the static frontend files (HTML, JS) so the FastAPI app can
 # serve them at /. This is the standard pattern for local dev:

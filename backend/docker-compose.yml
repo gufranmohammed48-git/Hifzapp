@@ -23,8 +23,8 @@
 services:
   fastconformer:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
       # Build args let you swap the model without editing the Dockerfile.
       # Defaults match the production model Muno459/fastconformer-quran
       # (4.13% WER overall, 0.93% on held-out unseen reciters, includes
@@ -90,7 +90,7 @@ volumes:
 # mohammed/fastconformer-quran-ar model automatically.
 secrets:
   hf_token:
-    file: ./hf_token.txt
+    file: backend/hf_token.txt
 
 
 # ============================================================================
