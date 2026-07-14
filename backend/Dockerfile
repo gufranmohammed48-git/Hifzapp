@@ -26,6 +26,16 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY app.py ./
 COPY download_model.py ./
 
+# Copy the static frontend files (HTML, JS) so the FastAPI app can
+# serve them at /. This is the standard pattern for local dev:
+# one container, one port (8080) serves both the API and the UI.
+# The DO production deployment uses nginx to serve these from
+# /opt/quran/web instead (see deploy/nginx.conf).
+COPY hafizAssist_streaming.html /app/static/
+COPY HafizAssist.html /app/static/
+COPY index.html /app/static/
+COPY phonemes-data.js /app/static/
+
 # Download the FastConformer model at build time (cached in image).
 #
 # Production model: Muno459/fastconformer-quran (4.13% WER overall,

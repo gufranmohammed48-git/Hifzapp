@@ -83,14 +83,14 @@ echo.
 
 echo.
 echo [4/4] Opening the frontend in your browser...
-start "" "%~dp0index.html"
+start "" "http://localhost:8080/"
 
 echo.
 echo ============================================================
 echo   Ready!
 echo ============================================================
 echo.
-echo Frontend:    http://localhost/index.html  (or the browser tab that just opened)
+echo Frontend:    http://localhost:8080/  (or the browser tab that just opened)
 echo Backend:     http://localhost:8080/healthz
 echo WebSocket:   ws://localhost:8080/ws
 echo.

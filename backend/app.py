@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import nemo.collections.asr as nemo_asr
 
@@ -228,9 +229,18 @@ class StreamingSession:
             log.exception(f"Finalize error: {e}")
 
 
-@app.get("/")
-async def root():
-    return HTMLResponse("<h1>FastConformer Quran ASR</h1><p>WebSocket endpoint: /ws</p>")
+# Serve the static frontend (HTML/JS) from /app/static/ at the root URL.
+# This way the page is at http://localhost:8080/ and the WebSocket is at
+# ws://localhost:8080/ws — same origin, no CORS issues, no separate web
+# server needed for local dev.
+import os
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
+else:
+    @app.get("/")
+    async def root():
+        return HTMLResponse("<h1>FastConformer Quran ASR</h1><p>WebSocket endpoint: /ws</p><p style='color:#888'>Note: static frontend not mounted (no /app/static/ dir in this image).</p>")
 
 
 @app.get("/healthz")

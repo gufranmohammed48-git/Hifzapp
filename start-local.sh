@@ -86,11 +86,11 @@ done
 if [ "$OPEN_BROWSER" -eq 1 ]; then
   echo
   echo "[4/4] Opening the frontend in your browser..."
-  URL="http://localhost/index.html"
+  URL="http://localhost:8080/"
   case "$(uname -s)" in
-    Darwin)  open "$SCRIPT_DIR/index.html" ;;
-    Linux)   xdg-open "$SCRIPT_DIR/index.html" 2>/dev/null || echo "  Open this file manually: $SCRIPT_DIR/index.html" ;;
-    *)       echo "  Open this file manually: $SCRIPT_DIR/index.html" ;;
+    Darwin)  open "$URL" ;;
+    Linux)   xdg-open "$URL" 2>/dev/null || echo "  Open this URL in your browser: $URL" ;;
+    *)       echo "  Open this URL in your browser: $URL" ;;
   esac
 else
   echo
@@ -102,7 +102,7 @@ echo "============================================================"
 echo "  Ready!"
 echo "============================================================"
 echo
-echo "Frontend:    $SCRIPT_DIR/index.html"
+echo "Frontend:    http://localhost:8080/"
 echo "Backend:     http://localhost:8080/healthz"
 echo "WebSocket:   ws://localhost:8080/ws"
 echo

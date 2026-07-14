@@ -57,7 +57,10 @@ services:
       - NVIDIA_VISIBLE_DEVICES=
     volumes:
       - model_data:/data        # persist model + debug chunks across rebuilds
-      - ./static:/opt/quran/web:ro   # mount frontend HTML files (optional)
+      # Frontend files are now COPY'd into the image (see Dockerfile) and
+      # served by FastAPI itself at /. No external web server needed for
+      # local dev. The DO production deployment still uses nginx to
+      # serve these from /opt/quran/web (see deploy/nginx.conf).
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
       interval: 30s
