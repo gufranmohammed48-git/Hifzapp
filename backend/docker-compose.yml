@@ -90,7 +90,7 @@ volumes:
 # mohammed/fastconformer-quran-ar model automatically.
 secrets:
   hf_token:
-    file: backend/hf_token.txt
+    file: ./hf_token.txt
 
 
 # ============================================================================
