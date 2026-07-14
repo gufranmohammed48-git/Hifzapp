@@ -15,13 +15,10 @@
 #   - NVIDIA GPU (CUDA) — set USE_GPU=1 in your .env or shell
 #
 # Notes:
-#   - This image is CPU-only by default. To enable GPU, see the
-#     `USE_GPU=1` block in the environment section below.
+#   - This image is CPU-only by default.
 #   - We expose 8080 internally; front it with nginx for HTTPS/WSS.
 #   - On Windows, make sure Docker Desktop has at least 4GB RAM allocated
 #     (Settings → Resources → Memory).
-
-version: "3.9"
 
 services:
   fastconformer:

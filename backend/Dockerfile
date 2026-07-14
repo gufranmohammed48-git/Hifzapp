@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy app code
 COPY app.py ./
+COPY download_model.py ./
 
 # Download the FastConformer model at build time (cached in image).
 #
@@ -37,7 +38,7 @@ COPY app.py ./
 #   1. Visit https://huggingface.co/Muno459/fastconformer-quran
 #   2. Click "Agree and access repository" (accepts the license terms)
 #   3. Create a read token at https://huggingface.co/settings/tokens
-#   4. Pass it via --build-arg HF_TOKEN=hf_xxx or set HF_TOKEN env var
+#   4. Put it in backend/hf_token.txt before running start-local.bat
 #
 # If no HF_TOKEN is set, the build falls back to the public (but
 # Alafasy-biased) mohammed/fastconformer-quran-ar model.
@@ -50,37 +51,10 @@ ARG FALLBACK_FILENAME=phase3_full_finetune/phase3_full_finetune_wer0.1432.nemo
 
 # Download at build time. Uses HF_TOKEN if present (for gated models).
 # Falls back to the public mohammed model if the gated one is inaccessible.
-RUN --mount=type=secret,id=hf_token,env=HF_TOKEN \
-    python -c "
-import os, sys
-from huggingface_hub import hf_hub_download
-
-repo = os.environ.get('MODEL_REPO', 'Muno459/fastconformer-quran')
-filename = os.environ.get('MODEL_FILENAME', 'nemo/fastconformer-quran.nemo')
-fallback_repo = os.environ.get('FALLBACK_REPO', 'mohammed/fastconformer-quran-ar')
-fallback_filename = os.environ.get('FALLBACK_FILENAME', 'phase3_full_finetune/phase3_full_finetune_wer0.1432.nemo')
-local_dir = '/data'
-
-# Map filename -> final /data path
-def dest_path(filename):
-    return '/data/' + filename.split('/')[-1]
-
-try:
-    print(f'Downloading {repo}/{filename}...')
-    path = hf_hub_download(repo_id=repo, filename=filename, local_dir=local_dir)
-    final = dest_path(filename)
-    if path != final:
-        import shutil; shutil.move(path, final)
-    print(f'  -> {final}')
-except Exception as e:
-    print(f'  Primary failed: {e}')
-    print(f'Falling back to {fallback_repo}/{fallback_filename}...')
-    path = hf_hub_download(repo_id=fallback_repo, filename=fallback_filename, local_dir=local_dir)
-    final = dest_path(fallback_filename)
-    if path != final:
-        import shutil; shutil.move(path, final)
-    print(f'  -> {final}')
-" \
+# Note: uses /bin/sh -c so $HF_TOKEN is expanded from the secret at build time.
+RUN --mount=type=secret,id=hf_token \
+    if [ -f /run/secrets/hf_token ]; then export HF_TOKEN="$(cat /run/secrets/hf_token)"; fi \
+    && python /app/download_model.py \
     && ls -la /data/*.nemo
 ENV MODEL_REPO=${MODEL_REPO} \
     MODEL_FILENAME=${MODEL_FILENAME} \
