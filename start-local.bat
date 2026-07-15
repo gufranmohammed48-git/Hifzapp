@@ -51,6 +51,13 @@ if not exist "%MODEL_PATH%" (
 echo   Found model at: %MODEL_PATH%
 echo.
 
+REM Clean up any stuck/failed containers from previous runs.
+REM The container name is fixed (fastconformer) so a second start always
+REM needs to stop the old one first. Sometimes it gets stuck.
+echo Cleaning up any previous containers...
+docker rm -f fastconformer 2>nul
+echo.
+
 cd backend
 
 REM Set MODEL_HOST_PATH for docker-compose (path to the dir containing the .nemo file).

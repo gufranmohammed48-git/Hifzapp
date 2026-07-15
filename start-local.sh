@@ -59,6 +59,13 @@ fi
 echo "  Found model at: $MODEL_FILE"
 echo
 
+# Clean up any stuck/failed containers from previous runs.
+# The container name is fixed (fastconformer) so a second start always
+# needs to stop the old one first. Sometimes it gets stuck.
+echo "Cleaning up any previous containers..."
+docker rm -f fastconformer 2>/dev/null || true
+echo
+
 cd backend
 
 # Check for HF token (optional, not used since we're mounting the model)
