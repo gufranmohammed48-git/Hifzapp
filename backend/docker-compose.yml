@@ -92,6 +92,30 @@ services:
           memory: 3G
           cpus: "2.0"
 
+  # ============================================================================
+  # caddy — HTTPS reverse proxy with self-signed cert (optional, for LAN access)
+  # ============================================================================
+  # Adds HTTPS on port 443 so other devices on the LAN can use the mic
+  # (Chrome blocks mic on plain HTTP non-localhost origins).
+  # Run with: docker compose --profile https up -d
+  # ============================================================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: hifzapp-caddy
+    restart: unless-stopped
+    profiles: ["https"]
+    ports:
+      - "443:443"   # HTTPS
+      - "80:80"     # HTTP (redirects to HTTPS)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data    # cert storage (persists across restarts)
+      - caddy_config:/config
+    networks:
+      - hifzapp-net
+    depends_on:
+      - fastconformer
+
 # (Secrets removed: model is now mounted from the host, no HF token needed)
 
 
@@ -124,35 +148,6 @@ services:
 #           memory: 6G
 #           cpus: "4.0"
 #
-
-# ============================================================================
-# caddy — HTTPS reverse proxy with self-signed cert (optional, for LAN access)
-# ============================================================================
-# Adds HTTPS on port 443 so other devices on the LAN can use the mic
-# (Chrome blocks mic on plain HTTP non-localhost origins).
-# Run with: docker compose --profile https up -d
-# Or for always-on: set ENABLE_HTTPS=1 in .env
-# ============================================================================
-x-caddy-env: &caddy-env
-  # No env vars needed; Caddy uses internal self-signed CA
-
-services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: hifzapp-caddy
-    restart: unless-stopped
-    profiles: ["https"]
-    ports:
-      - "443:443"   # HTTPS
-      - "80:80"     # HTTP (redirects to HTTPS)
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data    # cert storage (persists across restarts)
-      - caddy_config:/config
-    networks:
-      - hifzapp-net
-    depends_on:
-      - fastconformer
 
 networks:
   hifzapp-net:
