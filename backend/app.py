@@ -11,9 +11,9 @@ import numpy as np
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import nemo.collections.asr as nemo_asr
 
@@ -229,18 +229,53 @@ class StreamingSession:
             log.exception(f"Finalize error: {e}")
 
 
-# Serve the static frontend (HTML/JS) from /app/static/ at the root URL.
-# This way the page is at http://localhost:8080/ and the WebSocket is at
-# ws://localhost:8080/ws — same origin, no CORS issues, no separate web
-# server needed for local dev.
+# Serve the static frontend (HTML/JS) from /app/static/ at the root URL,
+# but only for non-API paths. We use a middleware (NOT app.mount) because
+# mount at '/' would intercept /healthz, /ws, /api/* and return 404 for them.
+# With middleware, API routes are matched first, then static files are
+# served as a fallback.
 import os
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+# Paths that should always go to FastAPI routes (not be served as static)
+_API_PREFIXES = ('/ws', '/api', '/healthz', '/readyz', '/openapi.json', '/docs', '/redoc')
+
+
+class StaticFilesMiddleware(BaseHTTPMiddleware):
+    """Serve static files for non-API paths. Falls back to index.html for SPA routing."""
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+        # API paths: pass through to FastAPI
+        if any(path == p or path.startswith(p + '/') for p in _API_PREFIXES):
+            return await call_next(request)
+        # Try to serve a static file at the requested path
+        if os.path.isdir(_STATIC_DIR):
+            requested = path.lstrip('/') or 'index.html'
+            file_path = os.path.join(_STATIC_DIR, requested)
+            if os.path.isfile(file_path):
+                return FileResponse(file_path)
+            # Fall back to index.html for client-side routing
+            index_path = os.path.join(_STATIC_DIR, 'index.html')
+            if os.path.isfile(index_path):
+                return FileResponse(index_path)
+        # No static dir, no file found — let FastAPI handle it (will 404 or route)
+        return await call_next(request)
+
+
+# Only add the middleware if the static dir exists (otherwise wasted overhead)
 if os.path.isdir(_STATIC_DIR):
-    app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
+    app.add_middleware(StaticFilesMiddleware)
+    log.info(f"Static frontend mounted from {_STATIC_DIR}")
 else:
+    log.warning(f"Static frontend NOT mounted (no dir at {_STATIC_DIR})")
     @app.get("/")
-    async def root():
-        return HTMLResponse("<h1>FastConformer Quran ASR</h1><p>WebSocket endpoint: /ws</p><p style='color:#888'>Note: static frontend not mounted (no /app/static/ dir in this image).</p>")
+    async def root_fallback():
+        return HTMLResponse(
+            "<h1>FastConformer Quran ASR</h1>"
+            "<p>WebSocket endpoint: /ws</p>"
+            "<p style='color:#888'>Note: static frontend not mounted "
+            "(no /app/static/ dir in this image).</p>"
+        )
 
 
 @app.get("/healthz")
