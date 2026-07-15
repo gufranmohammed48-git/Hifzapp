@@ -76,6 +76,11 @@ if [ $? -ne 0 ]; then
 fi
 cd ..
 
+# Verify the model file is accessible inside the container
+echo
+echo "Verifying model mount inside container..."
+docker exec fastconformer ls -la /data/fastconformer-quran.nemo 2>&1 || true
+
 echo
 echo "[2/4] Waiting for the backend to be healthy (up to 240s)..."
 echo

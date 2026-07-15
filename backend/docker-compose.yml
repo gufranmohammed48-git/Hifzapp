@@ -60,14 +60,16 @@ services:
       # /data/fastconformer-quran.nemo, so this directory must contain
       # a file named fastconformer-quran.nemo.
       #
-      # Default paths by OS:
-      #   Windows: C:/Users/Gufran/Downloads/model/nemo
-      #   macOS:   /Users/<you>/Downloads/model/nemo
-      #   Linux:   /home/<you>/Downloads/model/nemo
+      # On Windows Docker Desktop, ALL three path formats work:
+      #   - C:/Users/.../nemo        (forward slashes - what we use)
+      #   - C:\Users\...\nemo      (backslashes - escape in YAML)
+      #   - /c/Users/.../nemo        (WSL/Unix-style)
       #
       # Override with the MODEL_HOST_PATH env var if your file is elsewhere.
       # (The /data mount is read-write so debug chunks can be saved.)
-      - "${MODEL_HOST_PATH:-C:/Users/Gufran/Downloads/model/nemo}:/data"
+      #
+      # On non-Windows, fall back to the home directory.
+      - "${MODEL_HOST_PATH:-/c/Users/Gufran/Downloads/model/nemo}:/data"
       # Frontend files are now COPY'd into the image (see Dockerfile) and
       # served by FastAPI itself at /. No external web server needed for
       # local dev. The DO production deployment still uses nginx to

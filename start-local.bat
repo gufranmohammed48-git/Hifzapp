@@ -53,6 +53,12 @@ echo.
 
 cd backend
 
+REM Set MODEL_HOST_PATH for docker-compose (path to the dir containing the .nemo file).
+REM Tries Windows path first, then WSL path. The container will see this as /data.
+set MODEL_HOST_PATH=C:/Users/Gufran/Downloads/model/nemo
+echo   Using MODEL_HOST_PATH=%MODEL_HOST_PATH% (host path mounted as /data in container)
+echo.
+
 REM Check for HF token (optional, not used since we're mounting the model)
 if exist hf_token.txt (
     echo   Found hf_token.txt ^(not needed - using mounted model^)
@@ -62,6 +68,11 @@ if exist hf_token.txt (
 echo.
 
 docker compose up -d --build
+
+REM Verify the mount worked - the file should be visible inside the container
+echo.
+echo Verifying model mount inside container...
+docker exec fastconformer ls -la /data/fastconformer-quran.nemo 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Docker compose failed. Check the output above.
     pause
