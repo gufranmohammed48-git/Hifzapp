@@ -74,6 +74,8 @@ services:
       # served by FastAPI itself at /. No external web server needed for
       # local dev. The DO production deployment still uses nginx to
       # serve these from /opt/quran/web (see deploy/nginx.conf).
+    networks:
+      - hifzapp-net
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
       interval: 30s
@@ -121,3 +123,43 @@ services:
 #         limits:
 #           memory: 6G
 #           cpus: "4.0"
+#
+
+# ============================================================================
+# caddy — HTTPS reverse proxy with self-signed cert (optional, for LAN access)
+# ============================================================================
+# Adds HTTPS on port 443 so other devices on the LAN can use the mic
+# (Chrome blocks mic on plain HTTP non-localhost origins).
+# Run with: docker compose --profile https up -d
+# Or for always-on: set ENABLE_HTTPS=1 in .env
+# ============================================================================
+x-caddy-env: &caddy-env
+  # No env vars needed; Caddy uses internal self-signed CA
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: hifzapp-caddy
+    restart: unless-stopped
+    profiles: ["https"]
+    ports:
+      - "443:443"   # HTTPS
+      - "80:80"     # HTTP (redirects to HTTPS)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data    # cert storage (persists across restarts)
+      - caddy_config:/config
+    networks:
+      - hifzapp-net
+    depends_on:
+      - fastconformer
+
+networks:
+  hifzapp-net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+    name: hifzapp_caddy_data
+  caddy_config:
+    name: hifzapp_caddy_config

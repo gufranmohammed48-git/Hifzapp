@@ -1,0 +1,36 @@
+# Caddy config for the Hifzapp backend (local HTTPS).
+#
+# Caddy auto-generates a self-signed cert on first run. To make other
+# devices trust the cert, they need to import the public cert file
+# (see setup-https.ps1 for the export command).
+#
+# We listen on 443 (HTTPS) and 80 (HTTP, redirects to HTTPS).
+# All traffic is proxied to the FastAPI container on port 8080.
+
+:80 {
+    # Redirect plain HTTP to HTTPS
+    redir https://{host}{uri} permanent
+}
+
+:443 {
+    # Use the self-signed cert that Caddy generated in the data volume.
+    # Caddy puts it at /data/caddy/pki/authorities/local/root.crt by default
+    tls internal
+
+    # Proxy everything to the FastAPI backend
+    reverse_proxy fastconformer:8080 {
+        # WebSocket support (long-lived connections)
+        transport http {
+            dial_timeout 30s
+            response_header_timeout 86400s
+            read_timeout 86400s
+            write_timeout 86400s
+        }
+    }
+
+    # Log to stdout
+    log {
+        output stdout
+        level INFO
+    }
+}
