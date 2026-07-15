@@ -56,13 +56,13 @@ Write-Host ""
 Write-Host "[4/4] === Setup complete! ===" -ForegroundColor Green
 Write-Host ""
 Write-Host "Your Hifzapp is now available at:" -ForegroundColor Cyan
-Write-Host "  https://localhost/       (this PC, mic will work)" -ForegroundColor White
+Write-Host "  https://localhost:8443/       (this PC, mic will work)" -ForegroundColor White
 Write-Host ""
 
 # Get IP for LAN access
 $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.IPAddress -notlike "169.254.*" } | Select-Object -First 1).IPAddress
 if ($ip) {
-    Write-Host "  https://$ip/   (other PCs on this WiFi - see install steps below)" -ForegroundColor White
+    Write-Host "  https://$ip:8443/   (other PCs on this WiFi - see install steps below)" -ForegroundColor White
     Write-Host ""
 }
 

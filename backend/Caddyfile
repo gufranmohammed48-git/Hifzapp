@@ -1,18 +1,17 @@
 # Caddy config for the Hifzapp backend (local HTTPS).
 #
-# Caddy auto-generates a self-signed cert on first run. To make other
-# devices trust the cert, they need to import the public cert file
-# (see setup-https.ps1 for the export command).
+# We listen on 8443 (HTTPS). Port 443 is often reserved/blocked on
+# Windows (IIS, VMware, Windows HTTP services, etc.), so we use
+# 8443 to avoid conflicts. Just put ":8443" in the URL when
+# accessing from another PC.
 #
-# We listen on 443 (HTTPS) and 80 (HTTP, redirects to HTTPS).
+# Caddy auto-generates a self-signed cert on first run. To make
+# other devices trust the cert, they need to import
+# hifzapp-ca.crt (see setup-https.ps1 for the export command).
+#
 # All traffic is proxied to the FastAPI container on port 8080.
 
-:80 {
-    # Redirect plain HTTP to HTTPS
-    redir https://{host}{uri} permanent
-}
-
-:443 {
+:8443 {
     # Use the self-signed cert that Caddy generated in the data volume.
     # Caddy puts it at /data/caddy/pki/authorities/local/root.crt by default
     tls internal

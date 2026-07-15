@@ -105,8 +105,10 @@ services:
     restart: unless-stopped
     profiles: ["https"]
     ports:
-      - "443:443"   # HTTPS
-      - "80:80"     # HTTP (redirects to HTTPS)
+      - "8443:8443"   # HTTPS (8443 instead of 443 — Windows port conflict)
+      # No port 80/8080 redirect — would conflict with fastconformer.
+      # If users go to http://... they'll get a connection error,
+      # which is fine — they should be using https://
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data    # cert storage (persists across restarts)
