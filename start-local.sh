@@ -39,18 +39,33 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 echo "[1/4] Building and starting the backend..."
-echo "  (First time will take 5-10 minutes to download deps + model)"
+echo "  (First time will take 5-10 minutes for Python deps; model is mounted from your PC)"
+echo
+
+# Check that the model file exists at the expected location
+MODEL_FILE="$HOME/Downloads/model/nemo/fastconformer-quran.nemo"
+if [ ! -f "$MODEL_FILE" ]; then
+  echo "[ERROR] Model file not found at: $MODEL_FILE"
+  echo
+  echo "To fix: download the model first with this command:"
+  echo "  python -c \"from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='Muno459/fastconformer-quran', filename='nemo/fastconformer-quran.nemo', local_dir='$HOME/Downloads/model')\""
+  echo
+  echo "Or download the public mohammed model:"
+  echo "  python -c \"from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='mohammed/fastconformer-quran-ar', filename='phase3_full_finetune/phase3_full_finetune_wer0.1432.nemo', local_dir='$HOME/Downloads/model/nemo')\""
+  echo
+  echo "Then re-run this script."
+  exit 1
+fi
+echo "  Found model at: $MODEL_FILE"
 echo
 
 cd backend
 
-# Check for HF token (used to download the gated Muno459 model)
+# Check for HF token (optional, not used since we're mounting the model)
 if [ -f "hf_token.txt" ]; then
-  echo "  Found hf_token.txt — will use the gated Muno459 model (best quality)"
+  echo "  Found hf_token.txt (not needed - using mounted model)"
 else
-  echo "  No hf_token.txt found — will fall back to the public mohammed model"
-  echo "  (only works for Alafasy; other reciters won't match well)"
-  echo "  To use the best model: see backend/hf_token.txt.example"
+  echo "  No hf_token.txt - using mounted model from host"
 fi
 echo
 

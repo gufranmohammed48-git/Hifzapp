@@ -32,12 +32,11 @@ services:
       # HF_TOKEN env var (or use --build-arg HF_TOKEN=hf_xxx) to download.
       # Falls back to public mohammed/fastconformer-quran-ar if not.
       args:
+        SKIP_DOWNLOAD: "1"
         MODEL_REPO: Muno459/fastconformer-quran
         MODEL_FILENAME: nemo/fastconformer-quran.nemo
         FALLBACK_REPO: mohammed/fastconformer-quran-ar
         FALLBACK_FILENAME: phase3_full_finetune/phase3_full_finetune_wer0.1432.nemo
-      secrets:
-        - hf_token
     image: fastconformer-quran:latest
     container_name: fastconformer
     restart: unless-stopped
@@ -56,7 +55,19 @@ services:
       # block at the bottom of this file.
       - NVIDIA_VISIBLE_DEVICES=
     volumes:
-      - model_data:/data        # persist model + debug chunks across rebuilds
+      # Mount the host directory containing the .nemo file as /data in
+      # the container. The app expects the model at
+      # /data/fastconformer-quran.nemo, so this directory must contain
+      # a file named fastconformer-quran.nemo.
+      #
+      # Default paths by OS:
+      #   Windows: C:/Users/Gufran/Downloads/model/nemo
+      #   macOS:   /Users/<you>/Downloads/model/nemo
+      #   Linux:   /home/<you>/Downloads/model/nemo
+      #
+      # Override with the MODEL_HOST_PATH env var if your file is elsewhere.
+      # (The /data mount is read-write so debug chunks can be saved.)
+      - "${MODEL_HOST_PATH:-C:/Users/Gufran/Downloads/model/nemo}:/data"
       # Frontend files are now COPY'd into the image (see Dockerfile) and
       # served by FastAPI itself at /. No external web server needed for
       # local dev. The DO production deployment still uses nginx to
@@ -77,20 +88,7 @@ services:
           memory: 3G
           cpus: "2.0"
 
-volumes:
-  model_data:
-    name: fastconformer_model
-
-# Secrets — for accessing gated models on HuggingFace.
-# Create a file named hf_token.txt in the backend/ directory containing
-# your HuggingFace read token (https://huggingface.co/settings/tokens).
-# Then `docker compose up --build` will pass it to the Dockerfile.
-#
-# If you don't have a token, the build falls back to the public
-# mohammed/fastconformer-quran-ar model automatically.
-secrets:
-  hf_token:
-    file: ./hf_token.txt
+# (Secrets removed: model is now mounted from the host, no HF token needed)
 
 
 # ============================================================================

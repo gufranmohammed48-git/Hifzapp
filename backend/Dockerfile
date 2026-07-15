@@ -58,14 +58,22 @@ ARG MODEL_REPO=Muno459/fastconformer-quran
 ARG MODEL_FILENAME=nemo/fastconformer-quran.nemo
 ARG FALLBACK_REPO=mohammed/fastconformer-quran-ar
 ARG FALLBACK_FILENAME=phase3_full_finetune/phase3_full_finetune_wer0.1432.nemo
+# Set SKIP_DOWNLOAD=1 to skip the HF download (use when mounting the
+# model from the host instead — recommended for local dev).
+ARG SKIP_DOWNLOAD=0
 
 # Download at build time. Uses HF_TOKEN if present (for gated models).
 # Falls back to the public mohammed model if the gated one is inaccessible.
-# Note: uses /bin/sh -c so $HF_TOKEN is expanded from the secret at build time.
+# Set SKIP_DOWNLOAD=1 to skip this entirely (when the model is mounted
+# from the host via a volume — see docker-compose.yml).
+# Note: --mount=type=secret must be on the RUN itself (Dockerfile syntax).
 RUN --mount=type=secret,id=hf_token \
-    if [ -f /run/secrets/hf_token ]; then export HF_TOKEN="$(cat /run/secrets/hf_token)"; fi \
-    && python /app/download_model.py \
-    && ls -la /data/*.nemo
+    if [ "$SKIP_DOWNLOAD" = "1" ]; then \
+      echo "SKIP_DOWNLOAD=1: skipping model download. Mount model at /data via docker-compose."; \
+    else \
+      if [ -f /run/secrets/hf_token ]; then export HF_TOKEN="$(cat /run/secrets/hf_token)"; fi \
+      && python /app/download_model.py; \
+    fi
 ENV MODEL_REPO=${MODEL_REPO} \
     MODEL_FILENAME=${MODEL_FILENAME} \
     FALLBACK_REPO=${FALLBACK_REPO} \
