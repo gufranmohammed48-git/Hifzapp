@@ -77,7 +77,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 120s   # model load takes 60-90s on Intel UHD CPU
+      start_period: 180s   # model load on Intel UHD can be 90-150s
     # Resource limits — tune these for your machine.
     # For Intel UHD / 8GB RAM laptop: 3GB memory, 2 CPUs is comfortable.
     # For DO droplet ($24/mo, 4GB/2vCPU): same limits.

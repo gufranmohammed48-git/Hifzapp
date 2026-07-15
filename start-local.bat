@@ -70,7 +70,7 @@ if %errorlevel% neq 0 (
 cd ..
 
 echo.
-echo [2/4] Waiting for the backend to be healthy (up to 180s)...
+echo [2/4] Waiting for the backend to be healthy (up to 240s)...
 echo.
 
 set /a attempts=0
@@ -92,7 +92,7 @@ if %attempts% geq 60 (
     exit /b 1
 )
 
-echo   waiting... (%attempts%/60)
+echo   waiting... (%attempts%/80)
 timeout /t 3 /nobreak >nul
 goto wait_loop
 

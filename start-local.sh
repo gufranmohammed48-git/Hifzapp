@@ -77,10 +77,10 @@ fi
 cd ..
 
 echo
-echo "[2/4] Waiting for the backend to be healthy (up to 180s)..."
+echo "[2/4] Waiting for the backend to be healthy (up to 240s)..."
 echo
 
-for i in {1..60}; do
+for i in {1..80}; do
   if curl -sf http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
     echo
     echo "[3/4] Backend is healthy!"
@@ -88,7 +88,7 @@ for i in {1..60}; do
     echo
     break
   fi
-  if [ "$i" -eq 60 ]; then
+  if [ "$i" -eq 80 ]; then
     echo
     echo "[ERROR] Backend did not become healthy in 180s."
     echo "Common causes:"
@@ -99,7 +99,7 @@ for i in {1..60}; do
     echo "Check logs with:  cd backend && docker compose logs -f fastconformer"
     exit 1
   fi
-  printf "  waiting... (%d/60)\n" "$i"
+  printf "  waiting... (%d/80)\n" "$i"
   sleep 3
 done
 
