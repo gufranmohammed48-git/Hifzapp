@@ -41,7 +41,7 @@ services:
     container_name: fastconformer
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"   # bind to localhost only; nginx fronts this
+      - "8080:8080"   # listen on all interfaces so other devices on the LAN can connect
     environment:
       - MODEL_PATH=/data/fastconformer-quran.nemo
       - PYTHONUNBUFFERED=1
