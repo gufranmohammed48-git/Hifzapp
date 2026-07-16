@@ -1,18 +1,16 @@
-# Backend dependencies for the Hifzapp ASR (Zipformer Quran model).
+# Backend dependencies for the Hifzapp ASR (streaming FastConformer Quran model).
 #
-# sherpa-onnx is the official k2-fsa runtime for icefall Zipformer
-# streaming CTC models. It bundles onnxruntime internally and handles
-# all the streaming state management, mel feature extraction, and
-# CTC decoding for us.
+# Uses Muno459/fastconformer-quran-streaming (the cache-aware streaming
+# export of the 4.13%-WER FastConformer). Runs on onnxruntime directly —
+# no NeMo, no sherpa-onnx (sherpa-onnx 1.10 rejects this model's metadata).
 #
 # Image is much smaller than the previous NeMo-based one (~500MB vs ~3GB).
 
-# Streaming ASR runtime (pulls in onnxruntime)
-sherpa-onnx>=1.10.0,<2.0.0
+# Streaming ASR runtime
+onnxruntime>=1.17.0,<2.0
 
-# sherpa-onnx's metadata doesn't always declare numpy as a hard dep
-# for the linux/slim image, so we pin it explicitly.
-numpy>=1.22,<2.0
+# SentencePiece tokenizer (the model outputs subword IDs that need SPM to decode)
+sentencepiece>=0.2.0
 
 # Web server
 fastapi==0.110.0
@@ -20,7 +18,8 @@ uvicorn[standard]==0.29.0
 python-multipart==0.0.9
 websockets==12.0
 
-# Build-time downloader (optional — only used if SKIP_DOWNLOAD=0
-# in docker-compose, i.e. the container downloads from HF instead
-# of mounting from the host).
+# Math
+numpy>=1.22,<2.0
+
+# Build-time downloader (optional)
 huggingface_hub==0.23.0

@@ -31,8 +31,9 @@ COPY index.html                  /app/static/index.html
 COPY phonemes-data.js            /app/static/phonemes-data.js
 
 # Default config — overridden by docker-compose.yml env block
-ENV MODEL_PATH=/data/quran_phoneme_zipformer.int8.onnx \
-    TOKENS_PATH=/data/tokens.txt \
+ENV MODEL_PATH=/data/model_streaming_with_encoder.q8.onnx \
+    TOKENIZER_PATH=/data/tokenizer.model \
+    CMVN_PATH=/data/streaming_global_cmvn.npz \
     NUM_THREADS=2 \
     PYTHONUNBUFFERED=1 \
     PORT=8080
