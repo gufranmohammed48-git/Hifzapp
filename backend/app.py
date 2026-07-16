@@ -8,8 +8,10 @@ Latency: ~30ms per inference (vs 2-3s for the previous FastConformer
 NeMo model) on Intel UHD laptop CPU.
 """
 import os
+import re
 import sys
 import logging
+import unicodedata
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,6 +19,38 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 log = logging.getLogger("zipformer-quran")
+
+
+# ============================================================================
+# ARABIC NORMALIZER — strips diacritics, unifies character variants.
+# Mirrors the frontend's normalize() so we can pre-normalize the model
+# output on the server side. The frontend then uses the pre-normalized
+# text directly for matching (no double-normalization).
+# ============================================================================
+_DIACRITICS_RE = re.compile(
+    r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]"
+)
+_ALEF_RE = re.compile(r"[إأآاٱ]")
+_YA_RE = re.compile(r"[يىی]")
+_KAF_RE = re.compile(r"[كک]")
+_HA_RE = re.compile(r"[هھ]")
+_NON_ARABIC_RE = re.compile(r"[^\u0600-\u06FF]")
+
+
+def normalize_arabic(text: str) -> str:
+    """Strip diacritics + unify character variants for matching."""
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKC", text)
+    text = _DIACRITICS_RE.sub("", text)
+    text = _ALEF_RE.sub("ا", text)
+    text = _YA_RE.sub("ي", text)
+    text = _KAF_RE.sub("ك", text)
+    text = _HA_RE.sub("ه", text)
+    text = text.replace("ة", "ه")
+    text = _NON_ARABIC_RE.sub("", text)
+    return text.strip()
+
 
 # ============================================================================
 # Configuration
@@ -109,11 +143,21 @@ class StaticFilesMiddleware(BaseHTTPMiddleware):
         requested = path.lstrip("/") or "index.html"
         file_path = os.path.join(_STATIC_DIR, requested)
         if os.path.isfile(file_path):
-            return FileResponse(file_path)
+            response = FileResponse(file_path)
+            # Don't let the browser cache the dev frontend — we want users
+            # to always see the latest hafizAssist_streaming.html on reload.
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
         # Fall back to index.html for SPA routing
         index_path = os.path.join(_STATIC_DIR, "index.html")
         if os.path.isfile(index_path):
-            return FileResponse(index_path)
+            response = FileResponse(index_path)
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
         return await call_next(request)
 
 
@@ -191,7 +235,14 @@ async def websocket_endpoint(websocket: WebSocket):
             text = recognizer.get_result(stream)
             if text and text != last_text:
                 last_text = text
-                await websocket.send_json({"type": "partial", "text": text})
+                # Pre-normalize the model output so the frontend can
+                # use it directly for matching (no double normalization).
+                norm = normalize_arabic(text)
+                await websocket.send_json({
+                    "type": "partial",
+                    "text": text,        # raw — for the inspector
+                    "norm": norm,        # normalized — for the matcher
+                })
 
     except WebSocketDisconnect:
         log.info(
@@ -204,10 +255,13 @@ async def websocket_endpoint(websocket: WebSocket):
             while recognizer.is_ready(stream):
                 recognizer.decode_streams([stream])
             final_text = recognizer.get_result(stream)
-            if final_text and final_text != last_text:
-                await websocket.send_json({"type": "final", "text": final_text})
-            elif final_text:
-                await websocket.send_json({"type": "final", "text": final_text})
+            if final_text:
+                norm = normalize_arabic(final_text)
+                await websocket.send_json({
+                    "type": "final",
+                    "text": final_text,
+                    "norm": norm,
+                })
         except Exception as e:
             log.warning(f"Error during final flush: {e}")
     except Exception as e:

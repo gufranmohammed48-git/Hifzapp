@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Live Recitation Tracker (FastConformer)</title>
+<title>Live Recitation Tracker (Zipformer)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -252,7 +252,7 @@
   <div id="ayahContainer"></div>
 
   <div class="transcript-box hidden" id="transcriptBox">
-    <span class="label">📡 Live Model Inspector (what the FastConformer ASR is returning)</span>
+    <span class="label">📡 Live Model Inspector (what the Zipformer ASR is returning)</span>
     <div class="text" id="transcriptText"></div>
     <div class="conf" id="transcriptConf"></div>
     <div class="model-stats" id="modelStats" style="font-size:11px;color:var(--text-dim);margin-top:6px;font-family:ui-monospace,monospace"></div>
@@ -1028,7 +1028,7 @@ async function startListening(){
 
   ws.onopen = async () => {
     console.log('[hafiz] WebSocket OPEN — connected to backend');
-    statusEl.textContent = 'Connected to FastConformer backend. Requesting microphone...';
+    statusEl.textContent = 'Connected to Zipformer backend. Requesting microphone...';
     // Now get the mic
     try{
       // IMPORTANT: echoCancellation/noiseSuppression/autoGainControl OFF!
@@ -1122,6 +1122,7 @@ async function startListening(){
     statusEl.textContent = 'Streaming live — recite naturally. First chunk may take 1-3s, then real-time.';
     // Reset the delta tracker so a new session starts clean
     lastProcessedFullText = '';
+    lastProcessedNorm = '';
     modelResponseCount = 0;
     modelEmptyResponseCount = 0;
     noSpeechStreak = 0;
@@ -1135,11 +1136,14 @@ async function startListening(){
       if(data.type === 'partial'){
         const t = data.full_text || data.text || '';
         statusEl.textContent = 'Live: ' + (t || '(silence)') + ' — waiting for words…';
-        flushTranscriptToMatcher(t);
+        // Use pre-normalized text from backend (norm field) if present,
+        // otherwise fall back to the raw text (which processNewWord will
+        // normalize on the client side).
+        flushTranscriptToMatcher(t, data.norm || null);
       } else if(data.type === 'final'){
         const t = data.text || '';
         statusEl.textContent = 'Final: ' + (t || '(silence)');
-        flushTranscriptToMatcher(t);
+        flushTranscriptToMatcher(t, data.norm || null);
       } else if(data.type === 'error'){
         statusEl.textContent = 'Backend error: ' + (data.message || 'unknown');
         statusEl.classList.add('warn');
@@ -1229,7 +1233,8 @@ let modelResponseCount = 0;
 let modelEmptyResponseCount = 0;
 let modelLastEmptyAt = 0;
 let lastProcessedFullText = '';  // track what we've already processed so we only handle DELTAS
-function flushTranscriptToMatcher(fullText){
+let lastProcessedNorm = '';      // parallel tracker for the pre-normalized text
+function flushTranscriptToMatcher(fullText, preNorm){
   const now = Date.now();
   modelResponseCount++;
   if(lastModelResponseAt > 0){
@@ -1247,13 +1252,13 @@ function flushTranscriptToMatcher(fullText){
     // Show empty state so user knows model is being queried but returning nothing
     transcriptBox.classList.remove('hidden');
     transcriptText.innerHTML = '<i style="color:var(--text-dim)">⏳ Model running, but no Quran Arabic detected. Try reciting louder/closer or use the 🔊 Play Test Audio button.</i>';
-    transcriptConf.textContent = `FastConformer Quran — last ${modelEmptyResponseCount} responses were empty`;
+    transcriptConf.textContent = `Zipformer Quran — last ${modelEmptyResponseCount} responses were empty`;
     return;
   }
 
   transcriptBox.classList.remove('hidden');
   transcriptText.textContent = fullText.trim();
-  transcriptConf.textContent = 'FastConformer Quran (4.13% WER) — streaming';
+  transcriptConf.textContent = 'Zipformer Quran (5.83% WER) — streaming';
 
   // CRITICAL FIX: only process the DELTA (new words) since the last response.
   // Before this fix, every backend response reset pointer to 0 and reprocessed
@@ -1266,7 +1271,26 @@ function flushTranscriptToMatcher(fullText){
     return;
   }
   lastProcessedFullText = fullText.trim();
-  const words = newText.split(/\s+/).filter(Boolean);
+
+  // If the backend pre-normalized the text (new Zipformer backend sends
+  // a 'norm' field), use it directly. This avoids any browser-specific
+  // quirks in normalize() and makes matching robust across browsers.
+  // Otherwise split the raw newText and let processNewWord normalize each
+  // word (legacy FastConformer path).
+  let words;
+  if(preNorm && preNorm.trim()){
+    // Compute the delta on the NORMALIZED text in parallel, so the split
+    // matches the words we're about to process.
+    const newNorm = computeDelta(lastProcessedNorm, preNorm.trim());
+    if(!newNorm){
+      highlightCurrent();
+      return;
+    }
+    lastProcessedNorm = preNorm.trim();
+    words = newNorm.split(/\s+/).filter(Boolean);
+  } else {
+    words = newText.split(/\s+/).filter(Boolean);
+  }
   for(let i = 0; i < words.length; i++){
     processNewWord(words[i]);
   }
