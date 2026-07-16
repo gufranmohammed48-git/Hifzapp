@@ -1,69 +1,68 @@
-#!/usr/bin/env python3
-"""download_model.py — downloads the FastConformer model at Docker build time.
+"""Download the Zipformer Quran model from HuggingFace.
 
-Used by the Dockerfile RUN step. Tries the primary (gated) model first,
-falls back to the public one if the gated one is inaccessible.
+Used when you DON'T have the model files locally and want the Docker
+container to download them at build time (instead of mounting from
+the host). Set SKIP_DOWNLOAD=0 in the build args to enable this.
 
-Reads configuration from environment variables:
-  MODEL_REPO         — primary HF repo (e.g. Muno459/fastconformer-quran)
-  MODEL_FILENAME     — file in primary repo (e.g. nemo/fastconformer-quran.nemo)
-  FALLBACK_REPO      — fallback HF repo (e.g. mohammed/fastconformer-quran-ar)
-  FALLBACK_FILENAME  — file in fallback repo
-  HF_TOKEN           — optional HF read token (needed for gated models)
+Repo: https://huggingface.co/Muno459/zipformer_p-quran
 """
 import os
-import shutil
 import sys
 
-from huggingface_hub import hf_hub_download
+
+REPO_ID = "Muno459/zipformer_p-quran"
+MODEL_FILE = "quran_phoneme_zipformer.int8.onnx"
+TOKENS_FILE = "tokens.txt"
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/data")
+HF_TOKEN = os.environ.get("HF_TOKEN")  # only if model is gated
 
 
-REPO = os.environ.get('MODEL_REPO', 'Muno459/fastconformer-quran')
-FILENAME = os.environ.get('MODEL_FILENAME', 'nemo/fastconformer-quran.nemo')
-FALLBACK_REPO = os.environ.get('FALLBACK_REPO', 'mohammed/fastconformer-quran-ar')
-FALLBACK_FILENAME = os.environ.get(
-    'FALLBACK_FILENAME',
-    'phase3_full_finetune/phase3_full_finetune_wer0.1432.nemo',
-)
-LOCAL_DIR = '/data'
+def main():
+    from huggingface_hub import hf_hub_download
 
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    print(f"Output dir: {OUTPUT_DIR}")
+    print(f"Repo: {REPO_ID}")
+    if HF_TOKEN:
+        print("(using HF_TOKEN from env)")
 
-def dest_path(filename: str) -> str:
-    """Map a (possibly subpath) filename to its final /data destination."""
-    return '/data/' + filename.split('/')[-1]
-
-
-def try_download(repo: str, filename: str) -> str:
-    """Download a file from HF, move it to its final /data path. Returns path."""
-    print(f'Downloading {repo}/{filename}...')
-    cached_path = hf_hub_download(
-        repo_id=repo,
-        filename=filename,
-        local_dir=LOCAL_DIR,
+    print(f"\nDownloading {MODEL_FILE}...")
+    model_path = hf_hub_download(
+        repo_id=REPO_ID,
+        filename=MODEL_FILE,
+        local_dir=OUTPUT_DIR,
+        token=HF_TOKEN,
     )
-    final = dest_path(filename)
-    if cached_path != final and os.path.exists(cached_path):
-        os.makedirs(os.path.dirname(final) or '.', exist_ok=True)
-        shutil.move(cached_path, final)
-    return final
+    size_mb = os.path.getsize(model_path) / 1024 / 1024
+    print(f"  OK: {model_path} ({size_mb:.1f} MB)")
+
+    print(f"\nDownloading {TOKENS_FILE}...")
+    tokens_path = hf_hub_download(
+        repo_id=REPO_ID,
+        filename=TOKENS_FILE,
+        local_dir=OUTPUT_DIR,
+        token=HF_TOKEN,
+    )
+    print(f"  OK: {tokens_path}")
+
+    print("\nDone. Files in", OUTPUT_DIR, ":")
+    for f in sorted(os.listdir(OUTPUT_DIR)):
+        full = os.path.join(OUTPUT_DIR, f)
+        if os.path.isfile(full):
+            print(f"  {os.path.getsize(full) / 1024 / 1024:7.2f} MB  {f}")
 
 
-def main() -> int:
+if __name__ == "__main__":
     try:
-        path = try_download(REPO, FILENAME)
-        print(f'  -> {path}')
-        return 0
+        main()
     except Exception as e:
-        print(f'  Primary failed: {type(e).__name__}: {e}', file=sys.stderr)
-        print(f'Falling back to {FALLBACK_REPO}/{FALLBACK_FILENAME}...', file=sys.stderr)
-        try:
-            path = try_download(FALLBACK_REPO, FALLBACK_FILENAME)
-            print(f'  -> {path}')
-            return 0
-        except Exception as e2:
-            print(f'  Fallback also failed: {type(e2).__name__}: {e2}', file=sys.stderr)
-            return 1
-
-
-if __name__ == '__main__':
-    sys.exit(main())
+        print(f"\nFAILED: {type(e).__name__}: {e}")
+        if "gated" in str(e).lower() or "401" in str(e):
+            print(
+                "\nThis model is GATED. You need to:"
+                "\n  1. Go to https://huggingface.co/Muno459/zipformer_p-quran"
+                "\n  2. Accept the terms (click the button)"
+                "\n  3. Get a token at https://huggingface.co/settings/tokens"
+                "\n  4. Set HF_TOKEN env var or save it to backend/hf_token.txt"
+            )
+        sys.exit(1)

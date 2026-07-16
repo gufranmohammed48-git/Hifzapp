@@ -1,350 +1,234 @@
-"""
-FastConformer Quran Arabic ASR — WebSocket streaming server
-Uses the mohammed/fastconformer-quran-ar model from Hugging Face.
-Designed for Hugging Face Spaces (Docker SDK).
+"""Zipformer Quran ASR — streaming WebSocket server.
+
+Uses Muno459/zipformer_p-quran via sherpa-onnx for real-time
+phoneme-level transcription on CPU.
+
+Designed for live word-by-word highlighting in the Hifzapp frontend.
+Latency: ~30ms per inference (vs 2-3s for the previous FastConformer
+NeMo model) on Intel UHD laptop CPU.
 """
 import os
-import json
-import asyncio
+import sys
 import logging
-import numpy as np
-from typing import Optional
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+log = logging.getLogger("zipformer-quran")
+
+# ============================================================================
+# Configuration
+# ============================================================================
+MODEL_PATH = os.environ.get("MODEL_PATH", "/data/quran_phoneme_zipformer.int8.onnx")
+TOKENS_PATH = os.environ.get("TOKENS_PATH", "/data/tokens.txt")
+SAMPLE_RATE = 16000
+NUM_THREADS = int(os.environ.get("NUM_THREADS", "2"))
+PORT = int(os.environ.get("PORT", "8080"))
+
+# ============================================================================
+# Load model at startup
+# ============================================================================
+log.info("=" * 60)
+log.info("Hifzapp — Zipformer Quran ASR (sherpa-onnx)")
+log.info("=" * 60)
+
+if not os.path.isfile(MODEL_PATH):
+    log.error(f"Model file not found: {MODEL_PATH}")
+    sys.exit(1)
+if not os.path.isfile(TOKENS_PATH):
+    log.error(f"Tokens file not found: {TOKENS_PATH}")
+    sys.exit(1)
+
+log.info(f"Loading model: {MODEL_PATH}")
+log.info(f"Loading tokens: {TOKENS_PATH}")
+log.info(f"Threads: {NUM_THREADS}, Sample rate: {SAMPLE_RATE}")
+
+try:
+    import sherpa_onnx
+    recognizer = sherpa_onnx.OnlineRecognizer.from_zipformer2_ctc(
+        tokens=TOKENS_PATH,
+        model=MODEL_PATH,
+        num_threads=NUM_THREADS,
+        provider="cpu",
+        sample_rate=SAMPLE_RATE,
+        feature_dim=80,
+        decoding_method="greedy_search",
+    )
+except AttributeError as e:
+    log.error(f"sherpa-onnx missing from_zipformer2_ctc: {e}")
+    log.error("Try: pip install --upgrade sherpa-onnx")
+    sys.exit(1)
+except Exception as e:
+    log.error(f"Failed to load model: {type(e).__name__}: {e}")
+    sys.exit(1)
+
+log.info("Model loaded. Ready for streaming inference.")
+log.info("=" * 60)
+
+# ============================================================================
+# FastAPI app
+# ============================================================================
+import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-import nemo.collections.asr as nemo_asr
+app = FastAPI(title="Zipformer Quran ASR", version="2.0.0")
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-log = logging.getLogger("fastconformer-quran")
-
-# Monkey-patch json.dumps to handle numpy types globally. NeMo's transcribe() internally
-# writes a manifest file with float32 timestamps and crashes without this.
-_orig_json_dumps = json.dumps
-def _safe_dumps(obj, **kwargs):
-    kwargs.setdefault('cls', NumpyJSONEncoder)
-    return _orig_json_dumps(obj, **kwargs)
-json.dumps = _safe_dumps
-
-
-class NumpyJSONEncoder(json.JSONEncoder):
-    """Handle numpy types that the default JSON encoder rejects."""
-    def default(self, obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, (np.integer,)):
-            return int(obj)
-        if isinstance(obj, (np.floating,)):
-            return float(obj)
-        if isinstance(obj, (np.bool_,)):
-            return bool(obj)
-        if isinstance(obj, (np.str_,)):
-            return str(obj)
-        return super().default(obj)
-
-
-async def _safe_send_json(ws, data):
-    """Send JSON via WebSocket, with numpy type coercion."""
-    return await ws.send_text(json.dumps(data, cls=NumpyJSONEncoder, ensure_ascii=False))
-
-app = FastAPI(title="FastConformer Quran ASR")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load model at startup. Path is set by Dockerfile (downloads from HF).
-MODEL_PATH = os.environ.get(
-    "MODEL_PATH",
-    "/data/fastconformer-quran.nemo"
+# ============================================================================
+# Static file middleware (serves frontend alongside API routes)
+# ============================================================================
+_STATIC_DIR = os.environ.get("STATIC_DIR", "/app/static")
+_API_PREFIXES = (
+    "/ws", "/api", "/healthz", "/readyz",
+    "/openapi.json", "/docs", "/redoc", "/favicon.ico",
 )
-
-log.info(f"Loading FastConformer model from {MODEL_PATH} ...")
-log.info(f"Loading FastConformer Quran model (CTC) from {MODEL_PATH}")
-asr_model = nemo_asr.models.EncDecCTCModel.restore_from(MODEL_PATH, map_location="cpu")
-asr_model.eval()
-asr_model.eval()
-# Caching for streaming (cache-aware local attention)
-asr_model.change_attention_model("rel_pos_local_attn", [256, 256])
-asr_model.change_subsampling_conv_chunking_factor(1)
-log.info("Model loaded. Ready for streaming inference.")
-
-SAMPLE_RATE = 16000
-CHANNELS = 1
-DTYPE = "float32"
-
-# Each WebSocket session maintains a streaming state
-class StreamingSession:
-    def __init__(self, websocket: WebSocket):
-        self.websocket = websocket
-        self.buffer = np.zeros(SAMPLE_RATE * 60, dtype=np.float32)  # 60s rolling buffer
-        self.buffer_len = 0
-        self.committed_text = ""
-        # For RNN-T streaming we feed pre-encoded chunks
-        self.sample_offset = 0
-        self.last_result_text = ""
-        self.chunk_count = 0
-
-    async def process_chunk(self, audio_int16: np.ndarray):
-        """Take raw PCM int16 audio, run streaming inference, send word events."""
-        # Normalize int16 → float32 [-1, 1]
-        audio = audio_int16.astype(np.float32) / 32768.0
-
-        # Append to rolling buffer
-        if self.buffer_len + len(audio) > len(self.buffer):
-            # Drop oldest half to keep buffer bounded
-            shift = len(self.buffer) // 2
-            self.buffer[:self.buffer_len - shift] = self.buffer[shift:self.buffer_len]
-            self.buffer_len -= shift
-            self.sample_offset += shift
-        self.buffer[self.buffer_len:self.buffer_len + len(audio)] = audio
-        self.buffer_len += len(audio)
-        self.chunk_count += 1
-
-        # Only transcribe the LAST 2 seconds (most recent audio) to keep latency low
-        # and avoid transcribing all the silence before speech started.
-        last_two_sec = SAMPLE_RATE * 2  # 2s rolling window — model needs 2s+ context to recognize Quran reliably
-        start = max(0, self.buffer_len - last_two_sec)
-        log.info(f"process_chunk: buffer_len={self.buffer_len}, using last {len(audio_int16) if False else (self.buffer_len-start)} samples")
-        # For TRUE streaming we'd use the RNN-T greedy decoder with cache, but the
-        # easier path is: each chunk is the rolling buffer, get full hypothesis,
-        # diff against committed_text to extract new words.
-        try:
-            # Slice the active audio (last 2 seconds)
-            audio_active = self.buffer[start:self.buffer_len].copy()
-            # NeMo's hybrid FastConformer transcribe() only accepts a list of file
-            # paths. Write the audio to a temp WAV and pass that.
-            import tempfile, soundfile as sf
-            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            sf.write(tmp.name, audio_active, SAMPLE_RATE)
-            # DEBUG: save named copy AFTER writing (for inspecting what model is getting)
-            try:
-                import shutil
-                debug_path = f"/tmp/debug_chunks/chunk_{self.chunk_count:04d}.wav"
-                os.makedirs("/tmp/debug_chunks", exist_ok=True)
-                shutil.copy(tmp.name, debug_path)
-                if self.chunk_count < 5 or self.chunk_count % 10 == 0:
-                    log.info(f"DEBUG_SAVED: {debug_path} audio_len={len(audio_active)}")
-            except Exception as e:
-                log.warning(f"DEBUG_SAVE_FAILED: {e}")
-            hyp = asr_model.transcribe(
-                [tmp.name],
-                return_hypotheses=True,
-            )
-            try:
-                os.unlink(tmp.name)
-            except Exception:
-                pass
-            if isinstance(hyp, tuple):
-                hyp = hyp[0]
-            if isinstance(hyp, list):
-                hyp = hyp[0] if hyp else None
-            if hyp is None:
-                return
-            text = hyp.text if hasattr(hyp, "text") else str(hyp)
-            text = (text or "").strip()
-            if not text:
-                return
-            # Extract new words beyond what we've already committed
-            new_text = text
-            if self.committed_text and text.startswith(self.committed_text):
-                new_text = text[len(self.committed_text):].lstrip()
-            elif self.committed_text:
-                # Try to find common prefix (in case of small variations)
-                common = 0
-                for a, b in zip(self.committed_text, text):
-                    if a == b:
-                        common += 1
-                    else:
-                        break
-                new_text = text[common:].lstrip()
-            if new_text:
-                # Send partial word(s) as a JSON message
-                log.info(f"PARTIAL: {text!r} (new: {new_text!r})")
-                await _safe_send_json(self.websocket, {
-                    "type": "partial",
-                    "text": new_text,
-                    "full_text": text,
-                })
-                self.last_result_text = text
-            else:
-                log.info(f"NO_NEW_TEXT: full={text!r}")
-        except Exception as e:
-            log.exception(f"Streaming error: {e}")
-            await _safe_send_json(self.websocket, {
-                "type": "error",
-                "message": str(e),
-            })
-
-    async def commit(self):
-        """Mark current text as committed."""
-        self.committed_text = self.last_result_text
-        await _safe_send_json(self.websocket, {
-            "type": "committed",
-            "text": self.committed_text,
-        })
-
-    async def finalize(self):
-        """Run final transcription on full buffer."""
-        try:
-            audio_active = self.buffer[:self.buffer_len].copy()
-            if len(audio_active) < SAMPLE_RATE * 0.3:  # < 300ms, skip
-                return
-            import tempfile, soundfile as sf
-            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            sf.write(tmp.name, audio_active, SAMPLE_RATE)
-            hyp = asr_model.transcribe([tmp.name], return_hypotheses=True)
-            try: os.unlink(tmp.name)
-            except Exception: pass
-            if isinstance(hyp, tuple):
-                hyp = hyp[0]
-            if isinstance(hyp, list):
-                hyp = hyp[0] if hyp else None
-            if hyp is None:
-                return
-            text = (hyp.text or "").strip()
-            # Try to get word-level timestamps (coerce numpy types to native Python)
-            words = []
-            if hasattr(hyp, "timestamp") and hyp.timestamp:
-                def _coerce(v):
-                    # numpy float32/float64/int64 → Python float/int
-                    if hasattr(v, "item"):
-                        try: return v.item()
-                        except Exception: return float(v)
-                    return v
-                for w, s, e in hyp.timestamp.get("word", []):
-                    words.append({"word": _coerce(w), "start": _coerce(s), "end": _coerce(e)})
-            # Also coerce text in case the model returns a numpy string
-            text_str = str(text) if text is not None else ""
-            await _safe_send_json(self.websocket, {
-                "type": "final",
-                "text": text_str,
-                "words": words,
-            })
-        except Exception as e:
-            log.exception(f"Finalize error: {e}")
-
-
-# Serve the static frontend (HTML/JS) from /app/static/ at the root URL,
-# but only for non-API paths. We use a middleware (NOT app.mount) because
-# mount at '/' would intercept /healthz, /ws, /api/* and return 404 for them.
-# With middleware, API routes are matched first, then static files are
-# served as a fallback.
-import os
-_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-
-# Paths that should always go to FastAPI routes (not be served as static)
-_API_PREFIXES = ('/ws', '/api', '/healthz', '/readyz', '/openapi.json', '/docs', '/redoc')
 
 
 class StaticFilesMiddleware(BaseHTTPMiddleware):
-    """Serve static files for non-API paths. Falls back to index.html for SPA routing."""
+    """Serve files from _STATIC_DIR for non-API paths."""
+
     async def dispatch(self, request, call_next):
         path = request.url.path
-        # API paths: pass through to FastAPI
-        if any(path == p or path.startswith(p + '/') for p in _API_PREFIXES):
+        if any(path == p or path.startswith(p + "/") for p in _API_PREFIXES):
             return await call_next(request)
-        # Try to serve a static file at the requested path
-        if os.path.isdir(_STATIC_DIR):
-            requested = path.lstrip('/') or 'index.html'
-            file_path = os.path.join(_STATIC_DIR, requested)
-            if os.path.isfile(file_path):
-                return FileResponse(file_path)
-            # Fall back to index.html for client-side routing
-            index_path = os.path.join(_STATIC_DIR, 'index.html')
-            if os.path.isfile(index_path):
-                return FileResponse(index_path)
-        # No static dir, no file found — let FastAPI handle it (will 404 or route)
+        if not os.path.isdir(_STATIC_DIR):
+            return await call_next(request)
+        # Resolve the requested file
+        requested = path.lstrip("/") or "index.html"
+        file_path = os.path.join(_STATIC_DIR, requested)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        # Fall back to index.html for SPA routing
+        index_path = os.path.join(_STATIC_DIR, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
         return await call_next(request)
 
 
-# Only add the middleware if the static dir exists (otherwise wasted overhead)
 if os.path.isdir(_STATIC_DIR):
     app.add_middleware(StaticFilesMiddleware)
-    log.info(f"Static frontend mounted from {_STATIC_DIR}")
 else:
-    log.warning(f"Static frontend NOT mounted (no dir at {_STATIC_DIR})")
-    @app.get("/")
-    async def root_fallback():
-        return HTMLResponse(
-            "<h1>FastConformer Quran ASR</h1>"
-            "<p>WebSocket endpoint: /ws</p>"
-            "<p style='color:#888'>Note: static frontend not mounted "
-            "(no /app/static/ dir in this image).</p>"
-        )
+    log.warning(f"Static dir not found: {_STATIC_DIR} (API-only mode)")
+
+# ============================================================================
+# HTTP endpoints
+# ============================================================================
 
 
 @app.get("/healthz")
 async def healthz():
-    return JSONResponse({"status": "ok", "model": "fastconformer-quran-ar"})
-
-
-@app.get("/api/debug-audio")
-async def debug_audio():
-    """Return the LAST 10 saved debug chunks as a zip. ~640KB max."""
-    import re, zipfile, io
-    from fastapi.responses import StreamingResponse
-    if not os.path.isdir("/tmp/debug_chunks"):
-        return JSONResponse({"error": "no chunks saved yet"}, status_code=404)
-    # CRITICAL: sort by NUMERIC chunk number, not alphabetically!
-    # "chunk_0001" < "chunk_0010" lexically, but 1 < 10 numerically.
-    # Default lex sort gave chunk_0136..0145 (oldest) instead of chunk_0001..0010 (newest).
-    files = sorted(
-        [f for f in os.listdir("/tmp/debug_chunks") if f.endswith(".wav")],
-        key=lambda f: int(re.search(r"chunk_(\d+)", f).group(1))
-    )
-    if not files:
-        return JSONResponse({"error": "debug dir is empty"}, status_code=404)
-    files = files[-10:]  # last 10 only
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_STORED) as zf:
-        for f in files:
-            zf.write(os.path.join("/tmp/debug_chunks", f), f)
-    buf.seek(0)
-    return StreamingResponse(
-        buf,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=debug_last_{len(files)}.zip"},
+    return JSONResponse(
+        {
+            "status": "ok",
+            "model": "zipformer_p-quran",
+            "framework": "sherpa-onnx",
+            "sample_rate": SAMPLE_RATE,
+            "model_path": MODEL_PATH,
+        }
     )
 
+
+@app.get("/readyz")
+async def readyz():
+    return JSONResponse({"ready": True})
+
+
+# ============================================================================
+# WebSocket — streaming ASR
+# ============================================================================
+# Wire format: binary frames of int16 PCM, 16kHz, mono.
+# Server sends JSON text frames:
+#   {"type": "partial", "text": "<phoneme text>"}
+#   {"type": "final",   "text": "<phoneme text>"}
+#   {"type": "error",   "message": "<error>"}
+# ============================================================================
 
 
 @app.websocket("/ws")
-async def ws_transcribe(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    session = StreamingSession(websocket)
-    log.info("WebSocket connected")
+    stream = recognizer.create_stream()
+    client = websocket.client
+    log.info(f"Client connected: {client}")
+
+    # Stats (per-connection)
+    chunks_received = 0
+    samples_received = 0
+    last_text = ""
+
     try:
         while True:
-            msg = await websocket.receive()
-            if msg.get("type") == "websocket.disconnect":
-                break
-            if "bytes" in msg:
-                # Audio chunk: raw PCM int16 mono at 16kHz
-                raw = msg["bytes"]
-                audio = np.frombuffer(raw, dtype=np.int16)
-                await session.process_chunk(audio)
-            elif "text" in msg:
-                # Control message
-                try:
-                    data = json.loads(msg["text"])
-                    if data.get("type") == "commit":
-                        await session.commit()
-                    elif data.get("type") == "finalize":
-                        await session.finalize()
-                    elif data.get("type") == "reset":
-                        session.buffer_len = 0
-                        session.sample_offset = 0
-                        session.committed_text = ""
-                        session.last_result_text = ""
-                        await _safe_send_json(websocket, {"type": "reset"})
-                except json.JSONDecodeError:
-                    log.warning(f"Bad JSON: {msg['text']}")
+            # Receive audio chunk (int16 PCM, 16kHz, mono)
+            data = await websocket.receive_bytes()
+            if not data:
+                continue
+
+            # Convert int16 PCM to float32 in [-1, 1]
+            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+            chunks_received += 1
+            samples_received += len(samples)
+
+            # Feed to sherpa-onnx stream
+            stream.accept_waveform(SAMPLE_RATE, samples)
+
+            # Decode while ready
+            while recognizer.is_ready(stream):
+                recognizer.decode_streams([stream])
+
+            # Send partial result (only if it changed)
+            text = recognizer.get_result(stream)
+            if text and text != last_text:
+                last_text = text
+                await websocket.send_json({"type": "partial", "text": text})
+
     except WebSocketDisconnect:
-        log.info("WebSocket disconnected")
+        log.info(
+            f"Client disconnected after {chunks_received} chunks "
+            f"({samples_received} samples, {samples_received/SAMPLE_RATE:.1f}s)"
+        )
+        # Final flush
+        try:
+            stream.input_finished()
+            while recognizer.is_ready(stream):
+                recognizer.decode_streams([stream])
+            final_text = recognizer.get_result(stream)
+            if final_text and final_text != last_text:
+                await websocket.send_json({"type": "final", "text": final_text})
+            elif final_text:
+                await websocket.send_json({"type": "final", "text": final_text})
+        except Exception as e:
+            log.warning(f"Error during final flush: {e}")
     except Exception as e:
         log.exception(f"WebSocket error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+
+
+# ============================================================================
+# Entry point
+# ============================================================================
+if __name__ == "__main__":
+    import uvicorn
+
+    log.info(f"Starting server on 0.0.0.0:{PORT}")
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=PORT,
+        log_level="info",
+        access_log=False,
+    )
