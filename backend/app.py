@@ -82,87 +82,67 @@ def normalize_arabic(text: str) -> str:
 
 
 # ============================================================================
-# Feature extraction — mel spectrogram in pure numpy
+# Feature extraction — NeMo-compatible mel spectrogram via torchaudio
 # ============================================================================
-def _hz_to_mel(hz):
-    return 2595.0 * np.log10(1.0 + hz / 700.0)
+# Why torchaudio and not numpy: we tried 3 different manual implementations
+# (HTK, kaldi, kaldi-normalized) and the post-CMVN stats still came out as
+# mean=2.5, std=6.5 instead of mean=0, std=1. NeMo's AudioToMelSpectrogram
+# uses torchaudio.transforms.MelSpectrogram under the hood, with very
+# specific defaults (slaney mel scale, normalized mel filters, hann window,
+# power=2, etc.) that are tedious to replicate by hand. Just use the same
+# library NeMo uses and we know the features match.
+_MEL_SPEC = None
+_PREEMPHASIS = None
 
 
-def _mel_to_hz(mel):
-    return 700.0 * (10.0 ** (mel / 2595.0) - 1.0)
+def _build_feature_extractor():
+    global _MEL_SPEC, _PREEMPHASIS
+    import torch
+    import torchaudio.transforms as T
 
+    # Pre-emphasis filter (NeMo uses 0.97)
+    _PREEMPHASIS = T.Preemphasis(coef=PRE_EMPHASIS)
 
-def make_mel_filterbank(n_mels=N_MELS, n_fft=N_FFT, sample_rate=SAMPLE_RATE,
-                        fmin=0.0, fmax=None):
-    """Triangular mel filterbank (kaldi-style, [n_mels, n_fft//2 + 1]).
-
-    Each triangular filter is normalized by (right - left) / 2 so the
-    integral of the filter over frequency is 1. This is the convention
-    used by NeMo's AudioToMelSpectrogram preprocessor with htk=False.
-    """
-    if fmax is None:
-        fmax = sample_rate / 2.0
-    n_freqs = n_fft // 2 + 1
-    fft_freqs = np.linspace(0, sample_rate / 2, n_freqs)
-    mel_pts = np.linspace(_hz_to_mel(fmin), _hz_to_mel(fmax), n_mels + 2)
-    hz_pts = _mel_to_hz(mel_pts)
-
-    fb = np.zeros((n_mels, n_freqs), dtype=np.float32)
-    for i in range(n_mels):
-        left, center, right = hz_pts[i], hz_pts[i + 1], hz_pts[i + 2]
-        lower = (fft_freqs - left) / (center - left)
-        upper = (right - fft_freqs) / (right - center)
-        triangle = np.maximum(0.0, np.minimum(lower, upper))
-        # Kaldi-style normalization: filter area = 1
-        # Triangle area = (right - left) / 2, so divide by that
-        width = (right - left) / 2.0
-        if width > 0:
-            triangle = triangle / width
-        fb[i] = triangle
-    return fb
-
-
-# Pre-compute the mel filterbank and the window at module load.
-# IMPORTANT: the window must be N_FFT wide (512), not WIN_LENGTH (400),
-# because each frame is N_FFT=512 samples. If WIN_LENGTH < N_FFT, the
-# window is implicitly zero-padded at the edges (kaldi convention).
-_MEL_FB = make_mel_filterbank()
-_WINDOW = np.hanning(N_FFT).astype(np.float32)
+    # MelSpectrogram matching NeMo's defaults for the FastConformer
+    # (which is the same one the streaming export was trained with):
+    #   n_fft=512, win_length=400, hop_length=160, n_mels=80
+    #   power=2 (power spectrum, not magnitude)
+    #   mel_scale='slaney' (NeMo default, not htk)
+    #   window_fn=torch.hann_window
+    #   center=True (so the frame is centered on each sample)
+    #   normalized=False (we apply CMVN manually)
+    _MEL_SPEC = T.MelSpectrogram(
+        sample_rate=SAMPLE_RATE,
+        n_fft=N_FFT,
+        win_length=WIN_LENGTH,
+        hop_length=HOP_LENGTH,
+        n_mels=N_MELS,
+        power=2.0,
+        mel_scale="slaney",
+        window_fn=torch.hann_window,
+        center=True,
+        normalized=False,
+    ).eval()
 
 
 def compute_mel_features(audio: np.ndarray) -> np.ndarray:
-    """Compute 80-dim log-mel features (kaldi-style, then CMVN applied later).
+    """Compute 80-dim log-mel features (NeMo-compatible).
 
-    audio: 1D float32 in [-1, 1]
-    Returns: [n_frames, 80] float32
+    audio: 1D float32 in [-1, 1], 16kHz
+    Returns: [n_frames, 80] float32 (log-mel, NOT yet CMVN-normalized)
     """
-    if len(audio) < N_FFT:
+    import torch
+    if _MEL_SPEC is None:
+        _build_feature_extractor()
+    if len(audio) < WIN_LENGTH:
         return np.zeros((0, N_MELS), dtype=np.float32)
-
-    # Pre-emphasis
-    emphasized = np.concatenate([[audio[0]], audio[1:] - PRE_EMPHASIS * audio[:-1]])
-
-    # Pad for centered frames
-    pad = N_FFT // 2
-    padded = np.pad(emphasized, (pad, pad), mode="reflect")
-
-    # Frame the signal: shape [n_frames, N_FFT]
-    n_frames = (len(padded) - N_FFT) // HOP_LENGTH + 1
-    if n_frames <= 0:
-        return np.zeros((0, N_MELS), dtype=np.float32)
-
-    # Use sliding_window_view for efficient framing
-    frames = np.lib.stride_tricks.sliding_window_view(padded, N_FFT)[:n_frames * HOP_LENGTH:HOP_LENGTH]
-    frames = frames * _WINDOW
-
-    # Power spectrum via rFFT
-    spec = np.fft.rfft(frames, n=N_FFT, axis=-1)
-    power = (spec.real ** 2 + spec.imag ** 2).astype(np.float32)
-
-    # Mel filterbank + log compression
-    mel = power @ _MEL_FB.T
-    log_mel = np.log(mel + LOG_EPS).astype(np.float32)
-    return log_mel
+    with torch.no_grad():
+        x = torch.from_numpy(audio).float().unsqueeze(0)  # [1, T]
+        x = _PREEMPHASIS(x)
+        mel = _MEL_SPEC(x)  # [1, n_mels, T']
+        # log compression with small epsilon to avoid log(0)
+        log_mel = torch.log(mel + LOG_EPS)
+        return log_mel.squeeze(0).transpose(0, 1).contiguous().numpy().astype(np.float32)
 
 
 # ============================================================================
