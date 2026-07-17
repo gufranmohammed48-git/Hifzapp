@@ -356,8 +356,10 @@ class StreamState:
             if iterations <= 3 or iterations % 5 == 0 or (text and text != self.last_text):
                 log.info(
                     f"Inference #{iterations}: rms={audio_rms:.4f} "
-                    f"features_mean={float(features.mean()):.2f} "
-                    f"std={float(features.std()):.2f} "
+                    f"pre_mean={float(features.mean()):.2f} "
+                    f"pre_std={float(features.std()):.2f} "
+                    f"post_mean={float(chunk.mean()):.2f} "
+                    f"post_std={float(chunk.std()):.2f} "
                     f"in_T={audio_signal.shape[-1]} out_T={int(encoded_lengths[0])} "
                     f"preds_unique={len(unique)} (first 5: {unique[:5].tolist()}) "
                     f"text={text!r}"
