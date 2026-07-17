@@ -111,9 +111,12 @@ def make_mel_filterbank(n_mels=N_MELS, n_fft=N_FFT, sample_rate=SAMPLE_RATE,
     return fb
 
 
-# Pre-compute the mel filterbank and the window at module load
+# Pre-compute the mel filterbank and the window at module load.
+# IMPORTANT: the window must be N_FFT wide (512), not WIN_LENGTH (400),
+# because each frame is N_FFT=512 samples. If WIN_LENGTH < N_FFT, the
+# window is implicitly zero-padded at the edges (kaldi convention).
 _MEL_FB = make_mel_filterbank()
-_WINDOW = np.hanning(WIN_LENGTH).astype(np.float32) if WIN_LENGTH <= N_FFT else np.hanning(N_FFT).astype(np.float32)
+_WINDOW = np.hanning(N_FFT).astype(np.float32)
 
 
 def compute_mel_features(audio: np.ndarray) -> np.ndarray:
