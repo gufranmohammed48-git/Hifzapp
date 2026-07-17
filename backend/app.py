@@ -475,6 +475,8 @@ async def websocket_endpoint(websocket: WebSocket):
     state = StreamState()
     client = websocket.client
     log.info(f"Client connected: {client}")
+    msg_count = 0
+    byte_count = 0
     try:
         while True:
             # Use receive() so we can handle both binary frames (int16 PCM)
@@ -495,28 +497,44 @@ async def websocket_endpoint(websocket: WebSocket):
                 text_msg = message.get("text")
                 if text_msg is None:
                     continue
-                # If it's a JSON control message, ignore
+                # If it's a JSON control message, log and ignore
                 if text_msg.startswith("{"):
-                    log.debug(f"Ignoring control message: {text_msg!r}")
+                    log.info(f"Control message: {text_msg!r}")
                     continue
                 # Else treat as raw int16 bytes encoded in a text frame
                 data = text_msg.encode("latin-1")
             if not data:
                 continue
 
+            msg_count += 1
+            byte_count += len(data)
+            if msg_count <= 3 or msg_count % 10 == 0:
+                log.info(
+                    f"WS message #{msg_count}: {len(data)} bytes "
+                    f"(total: {byte_count/1024:.1f} KB)"
+                )
+
             # Convert int16 PCM to float32 in [-1, 1]
             samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
             # Feed through the streaming state
+            t0 = time.time()
             text = state.feed(samples)
+            dt = time.time() - t0
+            if dt > 0.5:
+                log.warning(f"Slow inference: {dt*1000:.0f}ms for {len(samples)} samples")
             if text is not None:
                 norm = normalize_arabic(text)
+                log.info(f"Partial text: {text!r}")
                 await websocket.send_json({
                     "type": "partial",
                     "text": text,
                     "norm": norm,
                 })
     except WebSocketDisconnect:
-        log.info("Client disconnected, flushing final result")
+        log.info(
+            f"Client disconnected. Received {msg_count} messages, "
+            f"{byte_count/1024:.1f} KB total"
+        )
     except Exception as e:
         log.exception(f"WebSocket error: {e}")
         try:
@@ -529,6 +547,7 @@ async def websocket_endpoint(websocket: WebSocket):
             final_text = state.flush()
             if final_text:
                 norm = normalize_arabic(final_text)
+                log.info(f"Final text: {final_text!r}")
                 await websocket.send_json({
                     "type": "final",
                     "text": final_text,
