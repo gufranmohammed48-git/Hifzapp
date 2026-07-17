@@ -162,14 +162,25 @@ def ctc_greedy_decode(logprobs: np.ndarray, sp, blank_id: int) -> str:
 
     Uses SentencePiece's DecodeIds which handles the subword merging
     for us (no manual BPE/WPM bookkeeping).
+
+    The model's output vocab (1025) is one larger than the SentencePiece
+    piece count (1024) — there's an extra output slot (probably for a
+    NeMo-specific padding/blank variant). We clamp the argmax to the
+    valid piece range to avoid IndexError from SentencePiece.
     """
     preds = logprobs.argmax(axis=-1)  # [B, T]
     if preds.ndim == 2:
         preds = preds[0]
+    piece_max = sp.GetPieceSize() - 1
     collapsed = []
     prev = -1
     for p in preds:
         p = int(p)
+        # Clamp out-of-range IDs to the last valid piece (they shouldn't
+        # occur in well-trained output, but defensive against the extra
+        # output slot this model has).
+        if p > piece_max:
+            continue
         if p != prev and p != blank_id:
             collapsed.append(p)
         prev = p
