@@ -23,18 +23,15 @@ if exist "backend\.env" (
 )
 if defined MODEL_HOST_PATH set "MODEL_DIR=%MODEL_HOST_PATH%"
 
-echo Checking model files in: %MODEL_DIR%
-if not exist "%MODEL_DIR%\model_streaming_with_encoder.q8.onnx" goto :no_model
-if not exist "%MODEL_DIR%\tokenizer.model" goto :no_tokenizer
-if not exist "%MODEL_DIR%\streaming_global_cmvn.npz" goto :no_cmvn
-echo   [OK] model_streaming_with_encoder.q8.onnx
-echo   [OK] tokenizer.model
-echo   [OK] streaming_global_cmvn.npz
+echo Checking model file in: %MODEL_DIR%
+if not exist "%MODEL_DIR%\fastconformer-quran.nemo" goto :no_model
+echo   [OK] fastconformer-quran.nemo
 
 REM ----- Clean up any old container -----
 echo.
 echo Cleaning up old container...
 docker rm -f fastconformer-quran 2>nul
+docker rm -f fastconformer 2>nul
 docker rm -f zipformer-quran 2>nul
 
 REM ----- Build and start -----
@@ -67,7 +64,7 @@ timeout /t 5 /nobreak >nul
 
 :check_health
 REM Capture health status to a temp file (avoids pipe-parsing issues)
-docker inspect --format={{.State.Health.Status}} fastconformer-quran > "%STATUS_FILE%" 2>nul
+docker inspect --format={{.State.Health.Status}} fastconformer > "%STATUS_FILE%" 2>nul
 if errorlevel 1 (
     REM Container might be starting, not necessarily an error
     set "STATUS="
@@ -84,7 +81,7 @@ echo.
 echo ERROR: backend did not become healthy in 5 minutes
 echo.
 echo Last 40 lines of logs:
-docker logs fastconformer-quran --tail 40
+docker logs fastconformer --tail 40
 exit /b 1
 
 :ready
@@ -106,14 +103,9 @@ exit /b 0
 :no_model
 echo.
 echo ERROR: model file not found
-echo   Expected: %MODEL_DIR%\quran_phoneme_zipformer.int8.onnx
+echo   Expected: %MODEL_DIR%\fastconformer-quran.nemo
 echo.
-echo Download from https://huggingface.co/Muno459/zipformer_p-quran
-echo and update MODEL_HOST_PATH in backend\.env
-exit /b 1
-
-:no_tokens
-echo.
-echo ERROR: tokens.txt not found
-echo   Expected: %MODEL_DIR%\tokens.txt
+echo If you have the model at a different path, set MODEL_HOST_PATH
+echo in backend\.env to point to the directory containing
+echo fastconformer-quran.nemo.
 exit /b 1

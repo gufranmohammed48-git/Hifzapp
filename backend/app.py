@@ -1,590 +1,350 @@
-"""FastConformer Streaming Quran ASR — WebSocket server.
-
-Uses Muno459/fastconformer-quran-streaming (cache-aware streaming export
-of the same 4.13%-WER model from Muno459/fastconformer-quran) via
-onnxruntime. Output is clean Arabic text (NOT phonemes), so the existing
-frontend matching works without changes.
-
-Why this model:
-- Same accuracy as the original FastConformer (4.13% WER, clean text)
-- Streaming mode with cache state (designed for real-time)
-- int8 quantized (132MB vs 459MB of the NeMo .nemo)
-- No NeMo dependency — 50x smaller Docker image, 10x faster startup
+"""
+FastConformer Quran Arabic ASR — WebSocket streaming server
+Uses the mohammed/fastconformer-quran-ar model from Hugging Face.
+Designed for Hugging Face Spaces (Docker SDK).
 """
 import os
-import re
-import sys
 import json
-import time
+import asyncio
 import logging
-import unicodedata
+import numpy as np
 from typing import Optional
 
-import numpy as np
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    stream=sys.stdout,
-)
-log = logging.getLogger("fastconformer-streaming")
-
-# ============================================================================
-# Configuration
-# ============================================================================
-MODEL_PATH = os.environ.get("MODEL_PATH", "/data/model_streaming_with_encoder.q8.onnx")
-TOKENIZER_PATH = os.environ.get("TOKENIZER_PATH", "/data/tokenizer.model")
-CMVN_PATH = os.environ.get("CMVN_PATH", "/data/streaming_global_cmvn.npz")
-SAMPLE_RATE = 16000
-NUM_THREADS = int(os.environ.get("NUM_THREADS", "2"))
-PORT = int(os.environ.get("PORT", "8080"))
-
-# Audio feature extraction parameters (NeMo/kaldi-style)
-N_FFT = 512
-HOP_LENGTH = 160
-WIN_LENGTH = 400
-N_MELS = 80
-PRE_EMPHASIS = 0.97
-LOG_EPS = 1e-6
-
-# Streaming chunk size (in mel frames at 10ms hop)
-# 100 frames = 1 second — matches the WebSocket audio chunk size
-STREAM_CHUNK_FRAMES = 100
-
-# Cache shapes (from the ONNX model)
-CACHE_LAST_CHANNEL_SHAPE = (1, 17, 70, 512)  # [B, n_layers, ctx_frames, d_model]
-CACHE_LAST_TIME_SHAPE = (1, 17, 512, 8)      # [B, n_layers, d_model, ctx_frames]
-
-# ============================================================================
-# Arabic normalizer — strips diacritics, unifies variants
-# ============================================================================
-_DIACRITICS_RE = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]")
-_ALEF_RE = re.compile(r"[إأآاٱ]")
-_YA_RE = re.compile(r"[يىی]")
-_KAF_RE = re.compile(r"[كک]")
-_HA_RE = re.compile(r"[هھ]")
-_NON_ARABIC_RE = re.compile(r"[^\u0600-\u06FF]")
-
-
-def normalize_arabic(text: str) -> str:
-    """Strip diacritics + unify character variants for matching."""
-    if not text:
-        return ""
-    text = unicodedata.normalize("NFKC", text)
-    text = _DIACRITICS_RE.sub("", text)
-    text = _ALEF_RE.sub("ا", text)
-    text = _YA_RE.sub("ي", text)
-    text = _KAF_RE.sub("ك", text)
-    text = _HA_RE.sub("ه", text)
-    text = text.replace("ة", "ه")
-    text = _NON_ARABIC_RE.sub("", text)
-    return text.strip()
-
-
-# ============================================================================
-# Feature extraction — NeMo-compatible mel spectrogram via torchaudio
-# ============================================================================
-# Why torchaudio and not numpy: we tried 3 different manual implementations
-# (HTK, kaldi, kaldi-normalized) and the post-CMVN stats still came out as
-# mean=2.5, std=6.5 instead of mean=0, std=1. NeMo's AudioToMelSpectrogram
-# uses torchaudio.transforms.MelSpectrogram under the hood, with very
-# specific defaults (slaney mel scale, normalized mel filters, hann window,
-# power=2, etc.) that are tedious to replicate by hand. Just use the same
-# library NeMo uses and we know the features match.
-_MEL_SPEC = None
-_PREEMPHASIS = None
-
-
-def _build_feature_extractor():
-    global _MEL_SPEC, _PREEMPHASIS
-    import torch
-    import torchaudio.transforms as T
-
-    # Pre-emphasis filter (NeMo uses 0.97)
-    _PREEMPHASIS = T.Preemphasis(coef=PRE_EMPHASIS)
-
-    # MelSpectrogram matching NeMo's defaults for the FastConformer
-    # (which is the same one the streaming export was trained with):
-    #   n_fft=512, win_length=400, hop_length=160, n_mels=80
-    #   power=2 (power spectrum, not magnitude)
-    #   mel_scale='slaney' (NeMo default, not htk)
-    #   window_fn=torch.hann_window
-    #   center=True (so the frame is centered on each sample)
-    #   normalized=False (we apply CMVN manually)
-    _MEL_SPEC = T.MelSpectrogram(
-        sample_rate=SAMPLE_RATE,
-        n_fft=N_FFT,
-        win_length=WIN_LENGTH,
-        hop_length=HOP_LENGTH,
-        n_mels=N_MELS,
-        power=2.0,
-        mel_scale="slaney",
-        window_fn=torch.hann_window,
-        center=True,
-        normalized=False,
-    ).eval()
-
-
-def compute_mel_features(audio: np.ndarray) -> np.ndarray:
-    """Compute 80-dim log-mel features (NeMo-compatible).
-
-    audio: 1D float32 in [-1, 1], 16kHz
-    Returns: [n_frames, 80] float32 (log-mel, NOT yet CMVN-normalized)
-    """
-    import torch
-    if _MEL_SPEC is None:
-        _build_feature_extractor()
-    if len(audio) < WIN_LENGTH:
-        return np.zeros((0, N_MELS), dtype=np.float32)
-    with torch.no_grad():
-        x = torch.from_numpy(audio).float().unsqueeze(0)  # [1, T]
-        x = _PREEMPHASIS(x)
-        mel = _MEL_SPEC(x)  # [1, n_mels, T']
-        # log compression with small epsilon to avoid log(0)
-        log_mel = torch.log(mel + LOG_EPS)
-        return log_mel.squeeze(0).transpose(0, 1).contiguous().numpy().astype(np.float32)
-
-
-# ============================================================================
-# CTC greedy decoder
-# ============================================================================
-def ctc_greedy_decode(logprobs: np.ndarray, sp, blank_id: int) -> str:
-    """Greedy CTC decode. logprobs: [B, T, V] → text string.
-
-    Uses SentencePiece's DecodeIds which handles the subword merging
-    for us (no manual BPE/WPM bookkeeping).
-
-    The model's output vocab (1025) is one larger than the SentencePiece
-    piece count (1024) — there's an extra output slot (probably for a
-    NeMo-specific padding/blank variant). We clamp the argmax to the
-    valid piece range to avoid IndexError from SentencePiece.
-    """
-    preds = logprobs.argmax(axis=-1)  # [B, T]
-    if preds.ndim == 2:
-        preds = preds[0]
-    piece_max = sp.GetPieceSize() - 1
-    collapsed = []
-    prev = -1
-    for p in preds:
-        p = int(p)
-        # Clamp out-of-range IDs to the last valid piece (they shouldn't
-        # occur in well-trained output, but defensive against the extra
-        # output slot this model has).
-        if p > piece_max:
-            continue
-        if p != prev and p != blank_id:
-            collapsed.append(p)
-        prev = p
-    return sp.DecodeIds(collapsed)
-
-
-# ============================================================================
-# Load model + tokenizer + CMVN at startup
-# ============================================================================
-log.info("=" * 60)
-log.info("Hifzapp — FastConformer Streaming Quran ASR (onnxruntime)")
-log.info("=" * 60)
-
-if not os.path.isfile(MODEL_PATH):
-    log.error(f"Model not found: {MODEL_PATH}")
-    sys.exit(1)
-if not os.path.isfile(TOKENIZER_PATH):
-    log.error(f"Tokenizer not found: {TOKENIZER_PATH}")
-    sys.exit(1)
-if not os.path.isfile(CMVN_PATH):
-    log.error(f"CMVN not found: {CMVN_PATH}")
-    sys.exit(1)
-
-log.info(f"Loading model: {MODEL_PATH}")
-import onnxruntime as ort
-sess_options = ort.SessionOptions()
-sess_options.intra_op_num_threads = NUM_THREADS
-sess_options.inter_op_num_threads = NUM_THREADS
-sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-sess = ort.InferenceSession(MODEL_PATH, sess_options=sess_options, providers=["CPUExecutionProvider"])
-
-# Resolve input/output names (so we can use the dict-by-name API)
-_input_names = [i.name for i in sess.get_inputs()]
-_output_names = [o.name for o in sess.get_outputs()]
-log.info(f"  {len(_input_names)} inputs: {_input_names}")
-log.info(f"  {len(_output_names)} outputs: {_output_names}")
-
-log.info(f"Loading tokenizer: {TOKENIZER_PATH}")
-import sentencepiece as spm
-sp = spm.SentencePieceProcessor()
-sp.Load(TOKENIZER_PATH)
-vocab_size = sp.GetPieceSize()
-# Detect the CTC blank token. The model output has 1025 classes
-# (vocab_size + 1 = 1025), so the extra slot at index vocab_size is
-# the CTC blank. SentencePiece's <blk> (if present) is in the regular
-# vocab, not at the blank index.
-blank_id = vocab_size  # 1024 in this model
-log.info(f"  SentencePiece pieces: {vocab_size}")
-log.info(f"  CTC blank_id (extra class): {blank_id}")
-# Show first few pieces for sanity
-for i in range(min(5, vocab_size)):
-    log.info(f"    piece {i}: {sp.IdToPiece(i)!r}")
-
-log.info(f"Loading CMVN: {CMVN_PATH}")
-cmvn_npz = np.load(CMVN_PATH)
-log.info(f"  CMVN keys: {list(cmvn_npz.files)}")
-for k in cmvn_npz.files:
-    log.info(f"    {k}: shape={cmvn_npz[k].shape}, dtype={cmvn_npz[k].dtype}")
-
-# This file has two variants of CMVN stats:
-#   - clean_* : statistics from clean studio recordings (tarteel-ai/everyayah)
-#   - tlog_*  : statistics from real-world recitations (tarteel-ai/tlog)
-# Default to 'clean' since the model was trained primarily on it;
-# override with CMVN_VARIANT=tlog if recognition is poor for your
-# mic (which captures more ambient noise than studio recordings).
-CMVN_VARIANT = os.environ.get("CMVN_VARIANT", "clean").lower()
-if CMVN_VARIANT not in ("clean", "tlog"):
-    log.error(f"CMVN_VARIANT must be 'clean' or 'tlog', got: {CMVN_VARIANT!r}")
-    sys.exit(1)
-
-mean_key = f"{CMVN_VARIANT}_mean"
-std_key = f"{CMVN_VARIANT}_std"
-if mean_key not in cmvn_npz.files:
-    log.error(f"CMVN file missing '{mean_key}'. Has: {list(cmvn_npz.files)}")
-    sys.exit(1)
-if std_key not in cmvn_npz.files:
-    log.error(f"CMVN file missing '{std_key}'. Has: {list(cmvn_npz.files)}")
-    sys.exit(1)
-
-cmvn_mean = cmvn_npz[mean_key].astype(np.float32)
-cmvn_std = cmvn_npz[std_key].astype(np.float32)
-log.info(f"  raw '{CMVN_VARIANT}' mean: {cmvn_mean.shape}, std: {cmvn_std.shape}")
-
-# CMVN shape might be (N,) for a 1D feature CMVN, or (N, 1)/(1, N) for 2D.
-# Flatten to 1D. If the size is not 80 (n_mels), it may be for a different
-# feature type (e.g. 400-dim linear spectrogram) — we'd need to regenerate.
-cmvn_mean = cmvn_mean.reshape(-1)
-cmvn_std = cmvn_std.reshape(-1)
-log.info(f"  flattened mean: {cmvn_mean.shape}, std: {cmvn_std.shape}")
-if cmvn_mean.shape[0] != N_MELS:
-    log.warning(
-        f"CMVN size {cmvn_mean.shape[0]} != n_mels {N_MELS}. "
-        f"This usually means the CMVN was computed for a different feature "
-        f"type (likely linear spectrogram, not log-mel). Expect bad results."
-    )
-
-log.info("Model + tokenizer + CMVN loaded. Ready for streaming inference.")
-log.info("=" * 60)
-
-
-# ============================================================================
-# Per-connection streaming state
-# ============================================================================
-class StreamState:
-    """Holds the cache state and audio buffer for one WebSocket connection."""
-
-    def __init__(self):
-        # Initial cache: all zeros with the right shape and dtype
-        self.cache_last_channel = np.zeros(CACHE_LAST_CHANNEL_SHAPE, dtype=np.float32)
-        self.cache_last_time = np.zeros(CACHE_LAST_TIME_SHAPE, dtype=np.float32)
-        # NeMo's cache-aware models expect the channel cache length to
-        # be initialized to its MAX value (70 for this model) on the
-        # first chunk, not 0. The cache is then treated as a rolling
-        # buffer of context frames (initially all zeros = silence).
-        self.cache_last_channel_len = np.array([CACHE_LAST_CHANNEL_SHAPE[2]], dtype=np.int64)
-        # Audio buffer for accumulating samples until we have enough
-        self.audio_buffer = np.zeros(0, dtype=np.float32)
-        # Last decoded text (so we only send when it changes)
-        self.last_text = ""
-        # Frame count processed so far
-        self.frames_processed = 0
-
-    def feed(self, audio_chunk: np.ndarray) -> Optional[str]:
-        """Feed an audio chunk. Returns the new text if it changed, else None."""
-        # Append to buffer
-        self.audio_buffer = np.concatenate([self.audio_buffer, audio_chunk])
-
-        new_text = None
-        iterations = 0
-        while True:
-            # Compute features for the current buffer
-            features = compute_mel_features(self.audio_buffer)
-            n_frames = features.shape[0]
-            # Process when we have at least STREAM_CHUNK_FRAMES frames
-            if n_frames < STREAM_CHUNK_FRAMES:
-                break
-
-            # Take the first STREAM_CHUNK_FRAMES frames
-            chunk = features[:STREAM_CHUNK_FRAMES]
-            # Apply CMVN — broadcast across feature dim (last axis)
-            chunk = (chunk - cmvn_mean) / cmvn_std
-            # Reshape for ONNX: [B=1, n_mels=80, T=chunk]
-            audio_signal = chunk.T[np.newaxis, :, :].astype(np.float32)  # [1, 80, T]
-            length = np.array([audio_signal.shape[-1]], dtype=np.int64)
-
-            # Run inference
-            outputs = sess.run(
-                _output_names,
-                {
-                    "audio_signal": audio_signal,
-                    "length": length,
-                    "cache_last_channel": self.cache_last_channel,
-                    "cache_last_time": self.cache_last_time,
-                    "cache_last_channel_len": self.cache_last_channel_len,
-                },
-            )
-            result = dict(zip(_output_names, outputs))
-
-            # Update cache
-            self.cache_last_channel = result["cache_last_channel_next"]
-            self.cache_last_time = result["cache_last_time_next"]
-            self.cache_last_channel_len = result["cache_last_channel_next_len"]
-
-            # Decode logprobs → text
-            logprobs = result["logprobs"]
-            encoded_lengths = result.get("encoded_lengths", [0])
-            text = ctc_greedy_decode(logprobs, sp, blank_id)
-            # Diagnostic: track unique tokens predicted
-            preds = logprobs.argmax(axis=-1).flatten()
-            unique = np.unique(preds)
-            iterations += 1
-            audio_rms = float(np.sqrt(np.mean(audio_chunk ** 2)))
-            if iterations <= 3 or iterations % 5 == 0 or (text and text != self.last_text):
-                log.info(
-                    f"Inference #{iterations}: rms={audio_rms:.4f} "
-                    f"pre_mean={float(features.mean()):.2f} "
-                    f"pre_std={float(features.std()):.2f} "
-                    f"post_mean={float(chunk.mean()):.2f} "
-                    f"post_std={float(chunk.std()):.2f} "
-                    f"in_T={audio_signal.shape[-1]} out_T={int(encoded_lengths[0])} "
-                    f"preds_unique={len(unique)} (first 5: {unique[:5].tolist()}) "
-                    f"text={text!r}"
-                )
-
-            if text and text != self.last_text:
-                self.last_text = text
-                new_text = text
-
-            # Advance buffer: drop the frames we processed
-            samples_consumed = STREAM_CHUNK_FRAMES * HOP_LENGTH
-            self.audio_buffer = self.audio_buffer[samples_consumed:]
-            self.frames_processed += STREAM_CHUNK_FRAMES
-
-        if iterations == 0:
-            log.debug(
-                f"feed: no inference (buffer={len(self.audio_buffer)} samples, "
-                f"need {STREAM_CHUNK_FRAMES * HOP_LENGTH})"
-            )
-        return new_text
-
-    def flush(self) -> Optional[str]:
-        """Process any remaining audio in the buffer (end of input)."""
-        if len(self.audio_buffer) < N_FFT:
-            return None
-        features = compute_mel_features(self.audio_buffer)
-        if features.shape[0] == 0:
-            return None
-        # Apply CMVN
-        features = (features - cmvn_mean) / cmvn_std
-        audio_signal = features.T[np.newaxis, :, :].astype(np.float32)
-        length = np.array([audio_signal.shape[-1]], dtype=np.int64)
-        outputs = sess.run(
-            _output_names,
-            {
-                "audio_signal": audio_signal,
-                "length": length,
-                "cache_last_channel": self.cache_last_channel,
-                "cache_last_time": self.cache_last_time,
-                "cache_last_channel_len": self.cache_last_channel_len,
-            },
-        )
-        result = dict(zip(_output_names, outputs))
-        # Note: at flush, we don't update the cache (no more audio to come)
-        text = ctc_greedy_decode(result["logprobs"], sp, blank_id)
-        if text and text != self.last_text:
-            self.last_text = text
-            return text
-        return None
-
-
-# ============================================================================
-# FastAPI app
-# ============================================================================
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-app = FastAPI(title="FastConformer Streaming Quran ASR", version="3.0.0")
+import nemo.collections.asr as nemo_asr
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+log = logging.getLogger("fastconformer-quran")
+
+# Monkey-patch json.dumps to handle numpy types globally. NeMo's transcribe() internally
+# writes a manifest file with float32 timestamps and crashes without this.
+_orig_json_dumps = json.dumps
+def _safe_dumps(obj, **kwargs):
+    kwargs.setdefault('cls', NumpyJSONEncoder)
+    return _orig_json_dumps(obj, **kwargs)
+json.dumps = _safe_dumps
+
+
+class NumpyJSONEncoder(json.JSONEncoder):
+    """Handle numpy types that the default JSON encoder rejects."""
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        if isinstance(obj, (np.str_,)):
+            return str(obj)
+        return super().default(obj)
+
+
+async def _safe_send_json(ws, data):
+    """Send JSON via WebSocket, with numpy type coercion."""
+    return await ws.send_text(json.dumps(data, cls=NumpyJSONEncoder, ensure_ascii=False))
+
+app = FastAPI(title="FastConformer Quran ASR")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ============================================================================
-# Static file middleware
-# ============================================================================
-_STATIC_DIR = os.environ.get("STATIC_DIR", "/app/static")
-_API_PREFIXES = (
-    "/ws", "/api", "/healthz", "/readyz",
-    "/openapi.json", "/docs", "/redoc", "/favicon.ico",
+# Load model at startup. Path is set by Dockerfile (downloads from HF).
+MODEL_PATH = os.environ.get(
+    "MODEL_PATH",
+    "/data/fastconformer-quran.nemo"
 )
+
+log.info(f"Loading FastConformer model from {MODEL_PATH} ...")
+log.info(f"Loading FastConformer Quran model (CTC) from {MODEL_PATH}")
+asr_model = nemo_asr.models.EncDecCTCModel.restore_from(MODEL_PATH, map_location="cpu")
+asr_model.eval()
+asr_model.eval()
+# Caching for streaming (cache-aware local attention)
+asr_model.change_attention_model("rel_pos_local_attn", [256, 256])
+asr_model.change_subsampling_conv_chunking_factor(1)
+log.info("Model loaded. Ready for streaming inference.")
+
+SAMPLE_RATE = 16000
+CHANNELS = 1
+DTYPE = "float32"
+
+# Each WebSocket session maintains a streaming state
+class StreamingSession:
+    def __init__(self, websocket: WebSocket):
+        self.websocket = websocket
+        self.buffer = np.zeros(SAMPLE_RATE * 60, dtype=np.float32)  # 60s rolling buffer
+        self.buffer_len = 0
+        self.committed_text = ""
+        # For RNN-T streaming we feed pre-encoded chunks
+        self.sample_offset = 0
+        self.last_result_text = ""
+        self.chunk_count = 0
+
+    async def process_chunk(self, audio_int16: np.ndarray):
+        """Take raw PCM int16 audio, run streaming inference, send word events."""
+        # Normalize int16 → float32 [-1, 1]
+        audio = audio_int16.astype(np.float32) / 32768.0
+
+        # Append to rolling buffer
+        if self.buffer_len + len(audio) > len(self.buffer):
+            # Drop oldest half to keep buffer bounded
+            shift = len(self.buffer) // 2
+            self.buffer[:self.buffer_len - shift] = self.buffer[shift:self.buffer_len]
+            self.buffer_len -= shift
+            self.sample_offset += shift
+        self.buffer[self.buffer_len:self.buffer_len + len(audio)] = audio
+        self.buffer_len += len(audio)
+        self.chunk_count += 1
+
+        # Only transcribe the LAST 2 seconds (most recent audio) to keep latency low
+        # and avoid transcribing all the silence before speech started.
+        last_two_sec = SAMPLE_RATE * 2  # 2s rolling window — model needs 2s+ context to recognize Quran reliably
+        start = max(0, self.buffer_len - last_two_sec)
+        log.info(f"process_chunk: buffer_len={self.buffer_len}, using last {len(audio_int16) if False else (self.buffer_len-start)} samples")
+        # For TRUE streaming we'd use the RNN-T greedy decoder with cache, but the
+        # easier path is: each chunk is the rolling buffer, get full hypothesis,
+        # diff against committed_text to extract new words.
+        try:
+            # Slice the active audio (last 2 seconds)
+            audio_active = self.buffer[start:self.buffer_len].copy()
+            # NeMo's hybrid FastConformer transcribe() only accepts a list of file
+            # paths. Write the audio to a temp WAV and pass that.
+            import tempfile, soundfile as sf
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            sf.write(tmp.name, audio_active, SAMPLE_RATE)
+            # DEBUG: save named copy AFTER writing (for inspecting what model is getting)
+            try:
+                import shutil
+                debug_path = f"/tmp/debug_chunks/chunk_{self.chunk_count:04d}.wav"
+                os.makedirs("/tmp/debug_chunks", exist_ok=True)
+                shutil.copy(tmp.name, debug_path)
+                if self.chunk_count < 5 or self.chunk_count % 10 == 0:
+                    log.info(f"DEBUG_SAVED: {debug_path} audio_len={len(audio_active)}")
+            except Exception as e:
+                log.warning(f"DEBUG_SAVE_FAILED: {e}")
+            hyp = asr_model.transcribe(
+                [tmp.name],
+                return_hypotheses=True,
+            )
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+            if isinstance(hyp, tuple):
+                hyp = hyp[0]
+            if isinstance(hyp, list):
+                hyp = hyp[0] if hyp else None
+            if hyp is None:
+                return
+            text = hyp.text if hasattr(hyp, "text") else str(hyp)
+            text = (text or "").strip()
+            if not text:
+                return
+            # Extract new words beyond what we've already committed
+            new_text = text
+            if self.committed_text and text.startswith(self.committed_text):
+                new_text = text[len(self.committed_text):].lstrip()
+            elif self.committed_text:
+                # Try to find common prefix (in case of small variations)
+                common = 0
+                for a, b in zip(self.committed_text, text):
+                    if a == b:
+                        common += 1
+                    else:
+                        break
+                new_text = text[common:].lstrip()
+            if new_text:
+                # Send partial word(s) as a JSON message
+                log.info(f"PARTIAL: {text!r} (new: {new_text!r})")
+                await _safe_send_json(self.websocket, {
+                    "type": "partial",
+                    "text": new_text,
+                    "full_text": text,
+                })
+                self.last_result_text = text
+            else:
+                log.info(f"NO_NEW_TEXT: full={text!r}")
+        except Exception as e:
+            log.exception(f"Streaming error: {e}")
+            await _safe_send_json(self.websocket, {
+                "type": "error",
+                "message": str(e),
+            })
+
+    async def commit(self):
+        """Mark current text as committed."""
+        self.committed_text = self.last_result_text
+        await _safe_send_json(self.websocket, {
+            "type": "committed",
+            "text": self.committed_text,
+        })
+
+    async def finalize(self):
+        """Run final transcription on full buffer."""
+        try:
+            audio_active = self.buffer[:self.buffer_len].copy()
+            if len(audio_active) < SAMPLE_RATE * 0.3:  # < 300ms, skip
+                return
+            import tempfile, soundfile as sf
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            sf.write(tmp.name, audio_active, SAMPLE_RATE)
+            hyp = asr_model.transcribe([tmp.name], return_hypotheses=True)
+            try: os.unlink(tmp.name)
+            except Exception: pass
+            if isinstance(hyp, tuple):
+                hyp = hyp[0]
+            if isinstance(hyp, list):
+                hyp = hyp[0] if hyp else None
+            if hyp is None:
+                return
+            text = (hyp.text or "").strip()
+            # Try to get word-level timestamps (coerce numpy types to native Python)
+            words = []
+            if hasattr(hyp, "timestamp") and hyp.timestamp:
+                def _coerce(v):
+                    # numpy float32/float64/int64 → Python float/int
+                    if hasattr(v, "item"):
+                        try: return v.item()
+                        except Exception: return float(v)
+                    return v
+                for w, s, e in hyp.timestamp.get("word", []):
+                    words.append({"word": _coerce(w), "start": _coerce(s), "end": _coerce(e)})
+            # Also coerce text in case the model returns a numpy string
+            text_str = str(text) if text is not None else ""
+            await _safe_send_json(self.websocket, {
+                "type": "final",
+                "text": text_str,
+                "words": words,
+            })
+        except Exception as e:
+            log.exception(f"Finalize error: {e}")
+
+
+# Serve the static frontend (HTML/JS) from /app/static/ at the root URL,
+# but only for non-API paths. We use a middleware (NOT app.mount) because
+# mount at '/' would intercept /healthz, /ws, /api/* and return 404 for them.
+# With middleware, API routes are matched first, then static files are
+# served as a fallback.
+import os
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+# Paths that should always go to FastAPI routes (not be served as static)
+_API_PREFIXES = ('/ws', '/api', '/healthz', '/readyz', '/openapi.json', '/docs', '/redoc')
 
 
 class StaticFilesMiddleware(BaseHTTPMiddleware):
+    """Serve static files for non-API paths. Falls back to index.html for SPA routing."""
     async def dispatch(self, request, call_next):
         path = request.url.path
-        if any(path == p or path.startswith(p + "/") for p in _API_PREFIXES):
+        # API paths: pass through to FastAPI
+        if any(path == p or path.startswith(p + '/') for p in _API_PREFIXES):
             return await call_next(request)
-        if not os.path.isdir(_STATIC_DIR):
-            return await call_next(request)
-        requested = path.lstrip("/") or "index.html"
-        file_path = os.path.join(_STATIC_DIR, requested)
-        if os.path.isfile(file_path):
-            response = FileResponse(file_path)
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-            return response
-        index_path = os.path.join(_STATIC_DIR, "index.html")
-        if os.path.isfile(index_path):
-            response = FileResponse(index_path)
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-            return response
+        # Try to serve a static file at the requested path
+        if os.path.isdir(_STATIC_DIR):
+            requested = path.lstrip('/') or 'index.html'
+            file_path = os.path.join(_STATIC_DIR, requested)
+            if os.path.isfile(file_path):
+                return FileResponse(file_path)
+            # Fall back to index.html for client-side routing
+            index_path = os.path.join(_STATIC_DIR, 'index.html')
+            if os.path.isfile(index_path):
+                return FileResponse(index_path)
+        # No static dir, no file found — let FastAPI handle it (will 404 or route)
         return await call_next(request)
 
 
+# Only add the middleware if the static dir exists (otherwise wasted overhead)
 if os.path.isdir(_STATIC_DIR):
     app.add_middleware(StaticFilesMiddleware)
+    log.info(f"Static frontend mounted from {_STATIC_DIR}")
 else:
-    log.warning(f"Static dir not found: {_STATIC_DIR}")
+    log.warning(f"Static frontend NOT mounted (no dir at {_STATIC_DIR})")
+    @app.get("/")
+    async def root_fallback():
+        return HTMLResponse(
+            "<h1>FastConformer Quran ASR</h1>"
+            "<p>WebSocket endpoint: /ws</p>"
+            "<p style='color:#888'>Note: static frontend not mounted "
+            "(no /app/static/ dir in this image).</p>"
+        )
 
 
-# ============================================================================
-# HTTP endpoints
-# ============================================================================
 @app.get("/healthz")
 async def healthz():
-    return JSONResponse(
-        {
-            "status": "ok",
-            "model": "fastconformer-quran-streaming",
-            "framework": "onnxruntime",
-            "sample_rate": SAMPLE_RATE,
-            "vocab_size": vocab_size,
-            "model_path": MODEL_PATH,
-        }
+    return JSONResponse({"status": "ok", "model": "fastconformer-quran-ar"})
+
+
+@app.get("/api/debug-audio")
+async def debug_audio():
+    """Return the LAST 10 saved debug chunks as a zip. ~640KB max."""
+    import re, zipfile, io
+    from fastapi.responses import StreamingResponse
+    if not os.path.isdir("/tmp/debug_chunks"):
+        return JSONResponse({"error": "no chunks saved yet"}, status_code=404)
+    # CRITICAL: sort by NUMERIC chunk number, not alphabetically!
+    # "chunk_0001" < "chunk_0010" lexically, but 1 < 10 numerically.
+    # Default lex sort gave chunk_0136..0145 (oldest) instead of chunk_0001..0010 (newest).
+    files = sorted(
+        [f for f in os.listdir("/tmp/debug_chunks") if f.endswith(".wav")],
+        key=lambda f: int(re.search(r"chunk_(\d+)", f).group(1))
+    )
+    if not files:
+        return JSONResponse({"error": "debug dir is empty"}, status_code=404)
+    files = files[-10:]  # last 10 only
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_STORED) as zf:
+        for f in files:
+            zf.write(os.path.join("/tmp/debug_chunks", f), f)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=debug_last_{len(files)}.zip"},
     )
 
 
-@app.get("/readyz")
-async def readyz():
-    return JSONResponse({"ready": True})
 
-
-# ============================================================================
-# WebSocket — streaming ASR
-# ============================================================================
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def ws_transcribe(websocket: WebSocket):
     await websocket.accept()
-    state = StreamState()
-    client = websocket.client
-    log.info(f"Client connected: {client}")
-    msg_count = 0
-    byte_count = 0
+    session = StreamingSession(websocket)
+    log.info("WebSocket connected")
     try:
         while True:
-            # Use receive() so we can handle both binary frames (int16 PCM)
-            # and text frames (sometimes browsers send ArrayBuffers as text
-            # over certain security contexts). This makes the endpoint
-            # robust to client quirks.
-            message = await websocket.receive()
-            if message is None:
-                continue
-            msg_type = message.get("type")
-            if msg_type == "websocket.disconnect":
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
                 break
-
-            data = message.get("bytes")
-            if data is None:
-                # Try text fallback — frontend may be sending a base64
-                # string or a JSON envelope with the audio.
-                text_msg = message.get("text")
-                if text_msg is None:
-                    continue
-                # If it's a JSON control message, log and ignore
-                if text_msg.startswith("{"):
-                    log.info(f"Control message: {text_msg!r}")
-                    continue
-                # Else treat as raw int16 bytes encoded in a text frame
-                data = text_msg.encode("latin-1")
-            if not data:
-                continue
-
-            msg_count += 1
-            byte_count += len(data)
-            if msg_count <= 3 or msg_count % 10 == 0:
-                log.info(
-                    f"WS message #{msg_count}: {len(data)} bytes "
-                    f"(total: {byte_count/1024:.1f} KB)"
-                )
-
-            # Convert int16 PCM to float32 in [-1, 1]
-            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
-            # Feed through the streaming state
-            t0 = time.time()
-            text = state.feed(samples)
-            dt = time.time() - t0
-            if dt > 0.5:
-                log.warning(f"Slow inference: {dt*1000:.0f}ms for {len(samples)} samples")
-            if text is not None:
-                norm = normalize_arabic(text)
-                log.info(f"Partial text: {text!r}")
-                await websocket.send_json({
-                    "type": "partial",
-                    "text": text,
-                    "norm": norm,
-                })
+            if "bytes" in msg:
+                # Audio chunk: raw PCM int16 mono at 16kHz
+                raw = msg["bytes"]
+                audio = np.frombuffer(raw, dtype=np.int16)
+                await session.process_chunk(audio)
+            elif "text" in msg:
+                # Control message
+                try:
+                    data = json.loads(msg["text"])
+                    if data.get("type") == "commit":
+                        await session.commit()
+                    elif data.get("type") == "finalize":
+                        await session.finalize()
+                    elif data.get("type") == "reset":
+                        session.buffer_len = 0
+                        session.sample_offset = 0
+                        session.committed_text = ""
+                        session.last_result_text = ""
+                        await _safe_send_json(websocket, {"type": "reset"})
+                except json.JSONDecodeError:
+                    log.warning(f"Bad JSON: {msg['text']}")
     except WebSocketDisconnect:
-        log.info(
-            f"Client disconnected. Received {msg_count} messages, "
-            f"{byte_count/1024:.1f} KB total"
-        )
+        log.info("WebSocket disconnected")
     except Exception as e:
         log.exception(f"WebSocket error: {e}")
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except Exception:
-            pass
-    finally:
-        # Always try to flush on disconnect
-        try:
-            final_text = state.flush()
-            if final_text:
-                norm = normalize_arabic(final_text)
-                log.info(f"Final text: {final_text!r}")
-                await websocket.send_json({
-                    "type": "final",
-                    "text": final_text,
-                    "norm": norm,
-                })
-        except Exception as e:
-            log.debug(f"Final flush error (client likely gone): {e}")
-
-
-# ============================================================================
-# Entry point
-# ============================================================================
-if __name__ == "__main__":
-    import uvicorn
-
-    log.info(f"Starting server on 0.0.0.0:{PORT}")
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=PORT,
-        log_level="info",
-        access_log=False,
-    )

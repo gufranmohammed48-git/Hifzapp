@@ -1,33 +1,8 @@
-# Backend dependencies for the Hifzapp ASR (streaming FastConformer Quran model).
-#
-# Uses Muno459/fastconformer-quran-streaming (the cache-aware streaming
-# export of the 4.13%-WER FastConformer). Runs on onnxruntime directly —
-# no NeMo, no sherpa-onnx (sherpa-onnx 1.10 rejects this model's metadata).
-#
-# Image is much smaller than the previous NeMo-based one (~500MB vs ~3GB).
-
-# Streaming ASR runtime
-onnxruntime>=1.17.0,<2.0
-
-# Audio feature extraction (NeMo-compatible MelSpectrogram)
-# torchaudio is much smaller than nemo_toolkit (~100MB vs ~2GB) but
-# uses the same MelSpectrogram transform under the hood, so the
-# features match what the model was trained on. We pin torch too
-# because torchaudio doesn't always pull it in correctly.
-torch>=2.1.0,<3.0
-torchaudio>=2.1.0,<3.0
-
-# SentencePiece tokenizer (the model outputs subword IDs that need SPM to decode)
-sentencepiece>=0.2.0
-
-# Web server
+nemo_toolkit[asr]==1.22.0
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
-python-multipart==0.0.9
+numpy>=1.22,<1.24
+scipy==1.13.0
 websockets==12.0
-
-# Math
-numpy>=1.22,<2.0
-
-# Build-time downloader (optional)
 huggingface_hub==0.23.0
+pyarrow<14
