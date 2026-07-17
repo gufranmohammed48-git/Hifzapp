@@ -94,7 +94,12 @@ def _mel_to_hz(mel):
 
 def make_mel_filterbank(n_mels=N_MELS, n_fft=N_FFT, sample_rate=SAMPLE_RATE,
                         fmin=0.0, fmax=None):
-    """Triangular mel filterbank (kaldi-style, [n_mels, n_fft//2 + 1])."""
+    """Triangular mel filterbank (kaldi-style, [n_mels, n_fft//2 + 1]).
+
+    Each triangular filter is normalized by (right - left) / 2 so the
+    integral of the filter over frequency is 1. This is the convention
+    used by NeMo's AudioToMelSpectrogram preprocessor with htk=False.
+    """
     if fmax is None:
         fmax = sample_rate / 2.0
     n_freqs = n_fft // 2 + 1
@@ -107,7 +112,13 @@ def make_mel_filterbank(n_mels=N_MELS, n_fft=N_FFT, sample_rate=SAMPLE_RATE,
         left, center, right = hz_pts[i], hz_pts[i + 1], hz_pts[i + 2]
         lower = (fft_freqs - left) / (center - left)
         upper = (right - fft_freqs) / (right - center)
-        fb[i] = np.maximum(0.0, np.minimum(lower, upper))
+        triangle = np.maximum(0.0, np.minimum(lower, upper))
+        # Kaldi-style normalization: filter area = 1
+        # Triangle area = (right - left) / 2, so divide by that
+        width = (right - left) / 2.0
+        if width > 0:
+            triangle = triangle / width
+        fb[i] = triangle
     return fb
 
 
