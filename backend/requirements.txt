@@ -1,8 +1,24 @@
-nemo_toolkit[asr]==1.22.0
+# Backend dependencies for the Hifzapp ASR (int8 ONNX FastConformer).
+#
+# Uses Muno459/fastconformer-quran's model_with_encoder.q8.onnx via
+# onnxruntime directly. The "with_encoder" export includes NeMo's
+# audio preprocessing inside the ONNX graph, so we just feed raw
+# 16kHz audio and get back logprobs/transcripts.
+#
+# Image size: ~700MB (was ~3GB with NeMo).
+# Latency:    ~300-600ms on Intel UHD (was 2-3s with NeMo).
+
+# Streaming ASR runtime
+onnxruntime>=1.17.0,<2.0
+
+# SentencePiece tokenizer for decoding model output IDs to text
+sentencepiece>=0.2.0
+
+# Web server
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
-numpy>=1.22,<1.24
-scipy==1.13.0
+python-multipart==0.0.9
 websockets==12.0
-huggingface_hub==0.23.0
-pyarrow<14
+
+# Math
+numpy>=1.22,<2.0

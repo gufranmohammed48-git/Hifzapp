@@ -1,162 +1,37 @@
-# docker-compose.yml — local dev + production deploy for the FastConformer backend.
+# docker-compose.yml — Hifzapp ASR (int8 ONNX FastConformer)
 #
-# Usage:
-#   docker compose up --build          # build image + start service
-#   docker compose up -d               # start in background
-#   docker compose logs -f fastconformer
-#   docker compose down                # stop
+# Mounts the local model directory from the host into the container.
+# Set MODEL_HOST_PATH in backend/.env (see backend/.env.example).
 #
-# The model is downloaded into a named volume at first build so subsequent
-# restarts don't re-download (459MB). Model path can be overridden via
-# MODEL_PATH env var if you mount a different model file.
-#
-# Works on:
-#   - CPU (any machine, including Intel UHD laptops)
-#   - NVIDIA GPU (CUDA) — set USE_GPU=1 in your .env or shell
-#
-# Notes:
-#   - This image is CPU-only by default.
-#   - We expose 8080 internally; front it with nginx for HTTPS/WSS.
-#   - On Windows, make sure Docker Desktop has at least 4GB RAM allocated
-#     (Settings → Resources → Memory).
+# Required files in MODEL_HOST_PATH (mounted as /data):
+#   - model_with_encoder.q8.onnx  (the int8 model with audio preprocessing)
+#   - tokenizer.model             (SentencePiece tokenizer)
 
 services:
-  fastconformer:
+  fastconformer-int8:
     build:
       context: ..
       dockerfile: backend/Dockerfile
-      # Build args let you swap the model without editing the Dockerfile.
-      # Defaults match the production model Muno459/fastconformer-quran
-      # (4.13% WER overall, 0.93% on held-out unseen reciters, includes
-      # diacritics). Muno459/fastconformer-quran is GATED — set
-      # HF_TOKEN env var (or use --build-arg HF_TOKEN=hf_xxx) to download.
-      # Falls back to public mohammed/fastconformer-quran-ar if not.
-      args:
-        SKIP_DOWNLOAD: "1"
-        MODEL_REPO: Muno459/fastconformer-quran
-        MODEL_FILENAME: nemo/fastconformer-quran.nemo
-        FALLBACK_REPO: mohammed/fastconformer-quran-ar
-        FALLBACK_FILENAME: phase3_full_finetune/phase3_full_finetune_wer0.1432.nemo
-    image: fastconformer-quran:latest
-    container_name: fastconformer
+    image: fastconformer-int8:local
+    container_name: fastconformer-int8
     restart: unless-stopped
     ports:
-      - "8080:8080"   # listen on all interfaces so other devices on the LAN can connect
-    environment:
-      - MODEL_PATH=/data/fastconformer-quran.nemo
-      - PYTHONUNBUFFERED=1
-      - PORT=8080
-      # Force CPU mode by hiding any GPU from the container. This works
-      # on:
-      #   - Laptops with Intel/AMD iGPUs (no CUDA anyway, but explicit)
-      #   - Systems with NVIDIA GPUs where you want to test CPU mode
-      #   - Docker Desktop for Windows (Intel UHD)
-      # To enable GPU, comment out the next line and uncomment the GPU
-      # block at the bottom of this file.
-      - NVIDIA_VISIBLE_DEVICES=
+      - "8080:8080"
     volumes:
-      # Mount the host directory containing the .nemo file as /data in
-      # the container. The app expects the model at
-      # /data/fastconformer-quran.nemo, so this directory must contain
-      # a file named fastconformer-quran.nemo.
-      #
-      # On Windows Docker Desktop, ALL three path formats work:
-      #   - C:/Users/.../nemo        (forward slashes - what we use)
-      #   - C:\Users\...\nemo      (backslashes - escape in YAML)
-      #   - /c/Users/.../nemo        (WSL/Unix-style)
-      #
-      # Override with the MODEL_HOST_PATH env var if your file is elsewhere.
-      # (The /data mount is read-write so debug chunks can be saved.)
-      #
-      # On non-Windows, fall back to the home directory.
-      - "${MODEL_HOST_PATH:-/c/Users/Gufran/Downloads/model/nemo}:/data"
-      # Frontend files are now COPY'd into the image (see Dockerfile) and
-      # served by FastAPI itself at /. No external web server needed for
-      # local dev. The DO production deployment still uses nginx to
-      # serve these from /opt/quran/web (see deploy/nginx.conf).
-    networks:
-      - hifzapp-net
+      - ${MODEL_HOST_PATH:-./model}:/data:ro
+    environment:
+      - MODEL_PATH=/data/model_with_encoder.q8.onnx
+      - TOKENIZER_PATH=/data/tokenizer.model
+      - NUM_THREADS=${NUM_THREADS:-2}
+      - WINDOW_SEC=${WINDOW_SEC:-1.0}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3).read()\" || exit 1"]
       interval: 30s
       timeout: 5s
+      start_period: 30s
       retries: 3
-      start_period: 180s   # model load on Intel UHD can be 90-150s
-    # Resource limits — tune these for your machine.
-    # For Intel UHD / 8GB RAM laptop: 3GB memory, 2 CPUs is comfortable.
-    # For DO droplet ($24/mo, 4GB/2vCPU): same limits.
-    # For a beefy desktop with 32GB RAM: bump to 6G memory, 4 CPUs.
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 2G
           cpus: "2.0"
-
-  # ============================================================================
-  # caddy — HTTPS reverse proxy with self-signed cert (optional, for LAN access)
-  # ============================================================================
-  # Adds HTTPS on port 443 so other devices on the LAN can use the mic
-  # (Chrome blocks mic on plain HTTP non-localhost origins).
-  # Run with: docker compose --profile https up -d
-  # ============================================================================
-  caddy:
-    image: caddy:2-alpine
-    container_name: hifzapp-caddy
-    restart: unless-stopped
-    profiles: ["https"]
-    ports:
-      - "8443:8443"   # HTTPS (8443 instead of 443 — Windows port conflict)
-      # No port 80/8080 redirect — would conflict with fastconformer.
-      # If users go to http://... they'll get a connection error,
-      # which is fine — they should be using https://
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data    # cert storage (persists across restarts)
-      - caddy_config:/config
-    networks:
-      - hifzapp-net
-    depends_on:
-      - fastconformer
-
-# (Secrets removed: model is now mounted from the host, no HF token needed)
-
-
-# ============================================================================
-# OPTIONAL: GPU profile
-# ============================================================================
-# If you have an NVIDIA GPU and want to use it for ~10x faster inference:
-#
-# 1. Install nvidia-container-toolkit on the host
-#    https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
-#
-# 2. Save this file as docker-compose.gpu.yml and run:
-#    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
-#
-# OR uncomment the deploy.resources.reservations block in the main service
-# above and remove `NVIDIA_VISIBLE_DEVICES=` from the environment section.
-# ============================================================================
-# services:
-#   fastconformer:
-#     environment:
-#       - NVIDIA_VISIBLE_DEVICES=all
-#     deploy:
-#       resources:
-#         reservations:
-#           devices:
-#             - driver: nvidia
-#               count: 1
-#               capabilities: [gpu]
-#         limits:
-#           memory: 6G
-#           cpus: "4.0"
-#
-
-networks:
-  hifzapp-net:
-    driver: bridge
-
-volumes:
-  caddy_data:
-    name: hifzapp_caddy_data
-  caddy_config:
-    name: hifzapp_caddy_config
