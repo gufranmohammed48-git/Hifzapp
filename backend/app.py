@@ -216,6 +216,8 @@ log.info(f"  vocab: {vocab_size}, blank_id: {blank_id}")
 log.info(f"Loading CMVN: {CMVN_PATH}")
 cmvn_npz = np.load(CMVN_PATH)
 log.info(f"  CMVN keys: {list(cmvn_npz.files)}")
+for k in cmvn_npz.files:
+    log.info(f"    {k}: shape={cmvn_npz[k].shape}, dtype={cmvn_npz[k].dtype}")
 
 # This file has two variants of CMVN stats:
 #   - clean_* : statistics from clean studio recordings (tarteel-ai/everyayah)
@@ -237,9 +239,22 @@ if std_key not in cmvn_npz.files:
     log.error(f"CMVN file missing '{std_key}'. Has: {list(cmvn_npz.files)}")
     sys.exit(1)
 
-cmvn_mean = cmvn_npz[mean_key].astype(np.float32).reshape(-1)
-cmvn_std = cmvn_npz[std_key].astype(np.float32).reshape(-1)
-log.info(f"  using '{CMVN_VARIANT}' variant  mean shape: {cmvn_mean.shape}, std shape: {cmvn_std.shape}")
+cmvn_mean = cmvn_npz[mean_key].astype(np.float32)
+cmvn_std = cmvn_npz[std_key].astype(np.float32)
+log.info(f"  raw '{CMVN_VARIANT}' mean: {cmvn_mean.shape}, std: {cmvn_std.shape}")
+
+# CMVN shape might be (N,) for a 1D feature CMVN, or (N, 1)/(1, N) for 2D.
+# Flatten to 1D. If the size is not 80 (n_mels), it may be for a different
+# feature type (e.g. 400-dim linear spectrogram) — we'd need to regenerate.
+cmvn_mean = cmvn_mean.reshape(-1)
+cmvn_std = cmvn_std.reshape(-1)
+log.info(f"  flattened mean: {cmvn_mean.shape}, std: {cmvn_std.shape}")
+if cmvn_mean.shape[0] != N_MELS:
+    log.warning(
+        f"CMVN size {cmvn_mean.shape[0]} != n_mels {N_MELS}. "
+        f"This usually means the CMVN was computed for a different feature "
+        f"type (likely linear spectrogram, not log-mel). Expect bad results."
+    )
 
 log.info("Model + tokenizer + CMVN loaded. Ready for streaming inference.")
 log.info("=" * 60)
@@ -282,7 +297,13 @@ class StreamState:
 
             # Take the first STREAM_CHUNK_FRAMES frames
             chunk = features[:STREAM_CHUNK_FRAMES]
-            # Apply CMVN
+            # Apply CMVN — broadcast across feature dim (last axis)
+            if cmvn_mean.shape[0] != chunk.shape[1]:
+                log.error(
+                    f"CMVN/feature size mismatch: cmvn={cmvn_mean.shape[0]}, "
+                    f"features={chunk.shape[1]}. The CMVN file was probably "
+                    f"computed for a different feature type. Inference will fail."
+                )
             chunk = (chunk - cmvn_mean) / cmvn_std
             # Reshape for ONNX: [B=1, n_mels=80, T=chunk]
             audio_signal = chunk.T[np.newaxis, :, :].astype(np.float32)  # [1, 80, T]
