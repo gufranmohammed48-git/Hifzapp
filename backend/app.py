@@ -291,7 +291,11 @@ class StreamState:
         # Initial cache: all zeros with the right shape and dtype
         self.cache_last_channel = np.zeros(CACHE_LAST_CHANNEL_SHAPE, dtype=np.float32)
         self.cache_last_time = np.zeros(CACHE_LAST_TIME_SHAPE, dtype=np.float32)
-        self.cache_last_channel_len = np.zeros([1], dtype=np.int64)
+        # NeMo's cache-aware models expect the channel cache length to
+        # be initialized to its MAX value (70 for this model) on the
+        # first chunk, not 0. The cache is then treated as a rolling
+        # buffer of context frames (initially all zeros = silence).
+        self.cache_last_channel_len = np.array([CACHE_LAST_CHANNEL_SHAPE[2]], dtype=np.int64)
         # Audio buffer for accumulating samples until we have enough
         self.audio_buffer = np.zeros(0, dtype=np.float32)
         # Last decoded text (so we only send when it changes)
@@ -342,6 +346,7 @@ class StreamState:
 
             # Decode logprobs → text
             logprobs = result["logprobs"]
+            encoded_lengths = result.get("encoded_lengths", [0])
             text = ctc_greedy_decode(logprobs, sp, blank_id)
             # Diagnostic: track unique tokens predicted
             preds = logprobs.argmax(axis=-1).flatten()
@@ -353,6 +358,7 @@ class StreamState:
                     f"Inference #{iterations}: rms={audio_rms:.4f} "
                     f"features_mean={float(features.mean()):.2f} "
                     f"std={float(features.std()):.2f} "
+                    f"in_T={audio_signal.shape[-1]} out_T={int(encoded_lengths[0])} "
                     f"preds_unique={len(unique)} (first 5: {unique[:5].tolist()}) "
                     f"text={text!r}"
                 )
