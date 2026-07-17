@@ -477,9 +477,33 @@ async def websocket_endpoint(websocket: WebSocket):
     log.info(f"Client connected: {client}")
     try:
         while True:
-            data = await websocket.receive_bytes()
+            # Use receive() so we can handle both binary frames (int16 PCM)
+            # and text frames (sometimes browsers send ArrayBuffers as text
+            # over certain security contexts). This makes the endpoint
+            # robust to client quirks.
+            message = await websocket.receive()
+            if message is None:
+                continue
+            msg_type = message.get("type")
+            if msg_type == "websocket.disconnect":
+                break
+
+            data = message.get("bytes")
+            if data is None:
+                # Try text fallback — frontend may be sending a base64
+                # string or a JSON envelope with the audio.
+                text_msg = message.get("text")
+                if text_msg is None:
+                    continue
+                # If it's a JSON control message, ignore
+                if text_msg.startswith("{"):
+                    log.debug(f"Ignoring control message: {text_msg!r}")
+                    continue
+                # Else treat as raw int16 bytes encoded in a text frame
+                data = text_msg.encode("latin-1")
             if not data:
                 continue
+
             # Convert int16 PCM to float32 in [-1, 1]
             samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
             # Feed through the streaming state
@@ -493,6 +517,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
     except WebSocketDisconnect:
         log.info("Client disconnected, flushing final result")
+    except Exception as e:
+        log.exception(f"WebSocket error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+    finally:
+        # Always try to flush on disconnect
         try:
             final_text = state.flush()
             if final_text:
@@ -503,13 +535,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "norm": norm,
                 })
         except Exception as e:
-            log.warning(f"Error during final flush: {e}")
-    except Exception as e:
-        log.exception(f"WebSocket error: {e}")
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except Exception:
-            pass
+            log.debug(f"Final flush error (client likely gone): {e}")
 
 
 # ============================================================================
