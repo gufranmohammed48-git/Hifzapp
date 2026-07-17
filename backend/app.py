@@ -215,25 +215,31 @@ log.info(f"  vocab: {vocab_size}, blank_id: {blank_id}")
 
 log.info(f"Loading CMVN: {CMVN_PATH}")
 cmvn_npz = np.load(CMVN_PATH)
-# .npz from numpy.savez has keys 'mean' and 'std' (or 'cms' and 'cmv' in some kaldi-style exports)
-if "mean" in cmvn_npz.files:
-    cmvn_mean = cmvn_npz["mean"].astype(np.float32)
-elif "cms" in cmvn_npz.files:
-    cmvn_mean = cmvn_npz["cms"].astype(np.float32)
-else:
-    log.error(f"CMVN file doesn't have 'mean' or 'cms' key. Has: {cmvn_npz.files}")
+log.info(f"  CMVN keys: {list(cmvn_npz.files)}")
+
+# This file has two variants of CMVN stats:
+#   - clean_* : statistics from clean studio recordings (tarteel-ai/everyayah)
+#   - tlog_*  : statistics from real-world recitations (tarteel-ai/tlog)
+# Default to 'clean' since the model was trained primarily on it;
+# override with CMVN_VARIANT=tlog if recognition is poor for your
+# mic (which captures more ambient noise than studio recordings).
+CMVN_VARIANT = os.environ.get("CMVN_VARIANT", "clean").lower()
+if CMVN_VARIANT not in ("clean", "tlog"):
+    log.error(f"CMVN_VARIANT must be 'clean' or 'tlog', got: {CMVN_VARIANT!r}")
     sys.exit(1)
-if "std" in cmvn_npz.files:
-    cmvn_std = cmvn_npz["std"].astype(np.float32)
-elif "cmv" in cmvn_npz.files:
-    cmvn_std = cmvn_npz["cmv"].astype(np.float32)
-else:
-    log.error(f"CMVN file doesn't have 'std' or 'cmv' key. Has: {cmvn_npz.files}")
+
+mean_key = f"{CMVN_VARIANT}_mean"
+std_key = f"{CMVN_VARIANT}_std"
+if mean_key not in cmvn_npz.files:
+    log.error(f"CMVN file missing '{mean_key}'. Has: {list(cmvn_npz.files)}")
     sys.exit(1)
-# Reshape to broadcast over [n_frames, n_mels]
-cmvn_mean = cmvn_mean.reshape(-1)
-cmvn_std = cmvn_std.reshape(-1)
-log.info(f"  mean shape: {cmvn_mean.shape}, std shape: {cmvn_std.shape}")
+if std_key not in cmvn_npz.files:
+    log.error(f"CMVN file missing '{std_key}'. Has: {list(cmvn_npz.files)}")
+    sys.exit(1)
+
+cmvn_mean = cmvn_npz[mean_key].astype(np.float32).reshape(-1)
+cmvn_std = cmvn_npz[std_key].astype(np.float32).reshape(-1)
+log.info(f"  using '{CMVN_VARIANT}' variant  mean shape: {cmvn_mean.shape}, std shape: {cmvn_std.shape}")
 
 log.info("Model + tokenizer + CMVN loaded. Ready for streaming inference.")
 log.info("=" * 60)

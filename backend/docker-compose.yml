@@ -25,6 +25,7 @@ services:
       - MODEL_PATH=/data/model_streaming_with_encoder.q8.onnx
       - TOKENIZER_PATH=/data/tokenizer.model
       - CMVN_PATH=/data/streaming_global_cmvn.npz
+      - CMVN_VARIANT=${CMVN_VARIANT:-clean}
       - NUM_THREADS=${NUM_THREADS:-2}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3).read()\" || exit 1"]
