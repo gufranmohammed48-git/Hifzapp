@@ -223,9 +223,16 @@ import sentencepiece as spm
 sp = spm.SentencePieceProcessor()
 sp.Load(TOKENIZER_PATH)
 vocab_size = sp.GetPieceSize()
-# The blank id is the first piece (typically 0 = <blk>)
-blank_id = sp.PieceToId("<blk>") if sp.IdToPiece(0) == "<blk>" else 0
-log.info(f"  vocab: {vocab_size}, blank_id: {blank_id}")
+# Detect the CTC blank token. The model output has 1025 classes
+# (vocab_size + 1 = 1025), so the extra slot at index vocab_size is
+# the CTC blank. SentencePiece's <blk> (if present) is in the regular
+# vocab, not at the blank index.
+blank_id = vocab_size  # 1024 in this model
+log.info(f"  SentencePiece pieces: {vocab_size}")
+log.info(f"  CTC blank_id (extra class): {blank_id}")
+# Show first few pieces for sanity
+for i in range(min(5, vocab_size)):
+    log.info(f"    piece {i}: {sp.IdToPiece(i)!r}")
 
 log.info(f"Loading CMVN: {CMVN_PATH}")
 cmvn_npz = np.load(CMVN_PATH)
