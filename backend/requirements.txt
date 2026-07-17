@@ -12,7 +12,9 @@ onnxruntime>=1.17.0,<2.0
 # Audio feature extraction (NeMo-compatible MelSpectrogram)
 # torchaudio is much smaller than nemo_toolkit (~100MB vs ~2GB) but
 # uses the same MelSpectrogram transform under the hood, so the
-# features match what the model was trained on.
+# features match what the model was trained on. We pin torch too
+# because torchaudio doesn't always pull it in correctly.
+torch>=2.1.0,<3.0
 torchaudio>=2.1.0,<3.0
 
 # SentencePiece tokenizer (the model outputs subword IDs that need SPM to decode)
