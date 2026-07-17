@@ -326,7 +326,7 @@ async def readyz():
 # WebSocket — streaming ASR
 # ============================================================================
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: FastAPI):
+async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     state = StreamState()
     log.info("Client connected")
