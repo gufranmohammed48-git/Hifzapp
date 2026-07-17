@@ -297,27 +297,19 @@ class StreamState:
         # Append to buffer
         self.audio_buffer = np.concatenate([self.audio_buffer, audio_chunk])
 
-        # Process every STREAM_CHUNK_FRAMES frames
-        # 1s of audio at 10ms hop = 100 frames
         new_text = None
+        iterations = 0
         while True:
             # Compute features for the current buffer
             features = compute_mel_features(self.audio_buffer)
             n_frames = features.shape[0]
-            # Process when we have at least STREAM_CHUNK_FRAMES frames,
-            # OR when we have a partial chunk at the end of audio
+            # Process when we have at least STREAM_CHUNK_FRAMES frames
             if n_frames < STREAM_CHUNK_FRAMES:
                 break
 
             # Take the first STREAM_CHUNK_FRAMES frames
             chunk = features[:STREAM_CHUNK_FRAMES]
             # Apply CMVN — broadcast across feature dim (last axis)
-            if cmvn_mean.shape[0] != chunk.shape[1]:
-                log.error(
-                    f"CMVN/feature size mismatch: cmvn={cmvn_mean.shape[0]}, "
-                    f"features={chunk.shape[1]}. The CMVN file was probably "
-                    f"computed for a different feature type. Inference will fail."
-                )
             chunk = (chunk - cmvn_mean) / cmvn_std
             # Reshape for ONNX: [B=1, n_mels=80, T=chunk]
             audio_signal = chunk.T[np.newaxis, :, :].astype(np.float32)  # [1, 80, T]
@@ -342,17 +334,36 @@ class StreamState:
             self.cache_last_channel_len = result["cache_last_channel_next_len"]
 
             # Decode logprobs → text
-            text = ctc_greedy_decode(result["logprobs"], sp, blank_id)
+            logprobs = result["logprobs"]
+            text = ctc_greedy_decode(logprobs, sp, blank_id)
+            # Diagnostic: track unique tokens predicted
+            preds = logprobs.argmax(axis=-1).flatten()
+            unique = np.unique(preds)
+            iterations += 1
+            audio_rms = float(np.sqrt(np.mean(audio_chunk ** 2)))
+            if iterations <= 3 or iterations % 5 == 0 or (text and text != self.last_text):
+                log.info(
+                    f"Inference #{iterations}: rms={audio_rms:.4f} "
+                    f"features_mean={float(features.mean()):.2f} "
+                    f"std={float(features.std()):.2f} "
+                    f"preds_unique={len(unique)} (first 5: {unique[:5].tolist()}) "
+                    f"text={text!r}"
+                )
+
             if text and text != self.last_text:
                 self.last_text = text
                 new_text = text
 
             # Advance buffer: drop the frames we processed
-            # (in sample space: STREAM_CHUNK_FRAMES * HOP_LENGTH samples)
             samples_consumed = STREAM_CHUNK_FRAMES * HOP_LENGTH
             self.audio_buffer = self.audio_buffer[samples_consumed:]
             self.frames_processed += STREAM_CHUNK_FRAMES
 
+        if iterations == 0:
+            log.debug(
+                f"feed: no inference (buffer={len(self.audio_buffer)} samples, "
+                f"need {STREAM_CHUNK_FRAMES * HOP_LENGTH})"
+            )
         return new_text
 
     def flush(self) -> Optional[str]:
