@@ -319,7 +319,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_STATIC_DIR = os.environ.get("STATIC_DIR", "/app/static")
+# Static dir resolution: prefer env var, then Docker default, then relative
+# to this file (so 'python backend/app.py' from the repo root just works).
+def _resolve_static_dir() -> str:
+    env = os.environ.get("STATIC_DIR")
+    if env:
+        return env
+    docker_default = "/app/static"
+    if os.path.isdir(docker_default):
+        return docker_default
+    # backend/app.py -> ../ (repo root where the HTML files live)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+_STATIC_DIR = _resolve_static_dir()
 _API_PREFIXES = (
     "/ws", "/api", "/healthz", "/readyz",
     "/openapi.json", "/docs", "/redoc", "/favicon.ico",

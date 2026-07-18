@@ -6,6 +6,32 @@ the mushaf highlight each word as you say it.
 
 **Try it now:** https://suzuki-microwave-instrumentation-registration.trycloudflare.com/
 
+## Quick Start (no Docker, recommended)
+
+```powershell
+# 1. Clone
+git clone https://github.com/gufranmohammed48-git/Hifzapp.git
+cd Hifzapp
+
+# 2. Download model files (one-time, ~133MB total)
+huggingface-cli download Muno459/fastconformer-quran model_with_encoder.q8.onnx --local-dir C:\Users\Gufran\Documents\model
+huggingface-cli download Muno459/fastconformer-quran tokenizer.model --local-dir C:\Users\Gufran\Documents\model
+
+# 3. Start the backend (creates venv, installs deps, runs app.py)
+.\start-direct.ps1
+
+# 4. In another terminal, start cloudflared for HTTPS (mic access):
+cloudflared tunnel --url http://localhost:8080
+```
+
+Then open the cloudflare URL in Chrome. That's it. No Docker.
+
+## Alternative: Docker mode (legacy)
+
+If you prefer the old Docker setup: `.\start-local.bat` — but be aware
+that Docker Desktop for Windows sometimes gets stuck on container
+"Starting" with volume mounts. The direct mode above sidesteps this.
+
 ## What's in this repo
 
 This is a monorepo (as of 2026-07-12) that holds both the frontend
