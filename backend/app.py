@@ -174,19 +174,15 @@ def compute_mel_features(audio: np.ndarray) -> np.ndarray:
         dither=0.0,
     )
     # kaldi.fbank returns [T, n_mels]; we want [n_mels, T]
-    mel = feats.transpose(0, 1).contiguous().numpy()
+    mel = feats.transpose(0, 1).contiguous().numpy()  # [n_mels, T]
 
-    # Apply CMVN if loaded: features = (features - mean) / std
-    if _CMVN_MEAN is not None and _CMVN_STD is not None:
-        # NeMo's CMVN stats are [n_mels, 2] or [n_mels] — handle both
-        if _CMVN_MEAN.ndim == 2 and _CMVN_MEAN.shape[1] == 2:
-            mean = _CMVN_MEAN[:, 0]
-            std = _CMVN_STD[:, 0]
-        else:
-            mean = _CMVN_MEAN
-            std = _CMVN_STD
-        # Reshape to broadcast over time axis
-        mel = (mel - mean[:, None]) / std[:, None]
+    # Per-utterance mean/variance normalization per mel-bin (REQUIRED).
+    # From Muno459/fastconformer-quran-coreml-offline docs:
+    #   "Per-utterance mean and variance normalization per channel"
+    # Each mel bin gets normalized so its time-axis distribution has
+    # mean=0, std=1. This is the missing step that was causing the
+    # model to predict all-blank tokens.
+    mel = (mel - mel.mean(axis=1, keepdims=True)) / (mel.std(axis=1, keepdims=True) + 1e-5)
 
     return mel
 
