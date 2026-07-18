@@ -89,10 +89,18 @@ set "NUM_THREADS=2"
 set "WINDOW_SEC=1.0"
 set "PORT=8080"
 
+REM Point at the .nemo file if present (used to extract CMVN stats).
+if exist "%MODEL_DIR%\fastconformer-quran.nemo" (
+    set "NEMO_PATH=%MODEL_DIR%\fastconformer-quran.nemo"
+) else (
+    echo   (no fastconformer-quran.nemo found - CMVN will be skipped)
+)
+
 echo.
 echo Environment:
 echo   MODEL_PATH    = %MODEL_PATH%
 echo   TOKENIZER_PATH= %TOKENIZER_PATH%
+echo   NEMO_PATH     = %NEMO_PATH%
 echo   STATIC_DIR    = %STATIC_DIR%
 echo   PORT          = %PORT%
 echo   NUM_THREADS   = %NUM_THREADS%

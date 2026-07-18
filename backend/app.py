@@ -32,6 +32,7 @@ log = logging.getLogger("fastconformer-int8")
 # ============================================================================
 MODEL_PATH = os.environ.get("MODEL_PATH", "/data/model_with_encoder.q8.onnx")
 TOKENIZER_PATH = os.environ.get("TOKENIZER_PATH", "/data/tokenizer.model")
+NEMO_PATH = os.environ.get("NEMO_PATH", "/data/fastconformer-quran.nemo")
 SAMPLE_RATE = 16000
 NUM_THREADS = int(os.environ.get("NUM_THREADS", "2"))
 PORT = int(os.environ.get("PORT", "8080"))
@@ -84,12 +85,75 @@ import torchaudio.compliance.kaldi as kaldi  # noqa: E402  (after sys.exit guard
 import torch  # noqa: E402  (torchaudio's underlying tensor lib)
 
 
+# ============================================================================
+# CMVN (Cepstral Mean and Variance Normalization) — load from .nemo at startup
+# ============================================================================
+# The model was trained with CMVN-normalized features (mean=0, std=1).
+# Without this, the model defaults to a single token output (e.g. "ي").
+# We extract the stats from the .nemo checkpoint the user already has.
+
+_CMVN_MEAN: Optional[np.ndarray] = None
+_CMVN_STD: Optional[np.ndarray] = None
+
+
+def _load_cmvn_from_nemo(nemo_path: str) -> None:
+    """Extract CMVN mean/std from a NeMo checkpoint, store in globals.
+
+    .nemo files are tar archives containing model_weights.ckpt (a PyTorch
+    Lightning checkpoint). The CMVN stats live at
+    'preprocessor.featurizer.cmvn.mean' / '.std' in the state dict.
+    """
+    global _CMVN_MEAN, _CMVN_STD
+    import io
+    import tarfile
+    if not os.path.isfile(nemo_path):
+        log.warning(f"NEMO_PATH not found: {nemo_path} — CMVN will NOT be applied")
+        log.warning("If model returns gibberish, download fastconformer-quran.nemo from HuggingFace")
+        return
+    log.info(f"Extracting CMVN stats from {nemo_path} (one-time, ~5s)...")
+    with tarfile.open(nemo_path, "r") as tar:
+        ckpt_member = None
+        for m in tar.getmembers():
+            if m.name.endswith("model_weights.ckpt"):
+                ckpt_member = m
+                break
+        if ckpt_member is None:
+            log.warning(f"No model_weights.ckpt inside {nemo_path} — CMVN will NOT be applied")
+            return
+        f = tar.extractfile(ckpt_member)
+        ckpt_bytes = f.read()
+    ckpt = torch.load(io.BytesIO(ckpt_bytes), map_location="cpu", weights_only=False)
+    state = ckpt.get("state_dict", ckpt)
+    mean = None
+    std = None
+    for k, v in state.items():
+        kl = k.lower()
+        if "preprocessor" in kl and "cmvn" in kl and "mean" in kl and "norm" not in kl:
+            mean = v.detach().cpu().numpy().astype(np.float32)
+        elif "preprocessor" in kl and "cmvn" in kl and "std" in kl and "norm" not in kl:
+            std = v.detach().cpu().numpy().astype(np.float32)
+    if mean is None or std is None:
+        log.warning("CMVN stats not found in .nemo state dict — CMVN will NOT be applied")
+        # Debug: print a few relevant keys
+        for k in list(state.keys())[:30]:
+            if "preprocessor" in k.lower() or "cmvn" in k.lower():
+                log.info(f"  candidate key: {k}")
+        return
+    log.info(f"  CMVN mean: shape={mean.shape}, sample={mean[:5]}")
+    log.info(f"  CMVN std:  shape={std.shape}, sample={std[:5]}")
+    _CMVN_MEAN = mean
+    _CMVN_STD = std
+
+
 def compute_mel_features(audio: np.ndarray) -> np.ndarray:
     """Convert raw 16kHz float32 audio to log-mel features [80, T].
 
     Uses torchaudio's kaldi-compatible MelSpectrogram, which is the same
-    transform NeMo's AudioToMelSpectrogram uses internally. Returns shape
-    [n_mels, n_frames] ready to be unsqueezed to [B, n_mels, n_frames].
+    transform NeMo's AudioToMelSpectrogram uses internally. Applies CMVN
+    normalization if stats were loaded from the .nemo checkpoint.
+
+    Returns shape [n_mels, n_frames] ready to be unsqueezed to
+    [B, n_mels, n_frames].
     """
     # torchaudio.compliance.kaldi.fbank expects float32 tensor with
     # shape [channel, samples] (2D). We add a leading channel dim.
@@ -107,7 +171,21 @@ def compute_mel_features(audio: np.ndarray) -> np.ndarray:
         dither=0.0,
     )
     # kaldi.fbank returns [T, n_mels]; we want [n_mels, T]
-    return feats.transpose(0, 1).contiguous().numpy()
+    mel = feats.transpose(0, 1).contiguous().numpy()
+
+    # Apply CMVN if loaded: features = (features - mean) / std
+    if _CMVN_MEAN is not None and _CMVN_STD is not None:
+        # NeMo's CMVN stats are [n_mels, 2] or [n_mels] — handle both
+        if _CMVN_MEAN.ndim == 2 and _CMVN_MEAN.shape[1] == 2:
+            mean = _CMVN_MEAN[:, 0]
+            std = _CMVN_STD[:, 0]
+        else:
+            mean = _CMVN_MEAN
+            std = _CMVN_STD
+        # Reshape to broadcast over time axis
+        mel = (mel - mean[:, None]) / std[:, None]
+
+    return mel
 
 
 # ============================================================================
@@ -140,6 +218,11 @@ for inp in sess.get_inputs():
     log.info(f"    IN  {inp.name}: shape={inp.shape}, type={inp.type}")
 for out in sess.get_outputs():
     log.info(f"    OUT {out.name}: shape={out.shape}, type={out.type}")
+
+# Load CMVN stats from the .nemo checkpoint (the model was trained with
+# CMVN-normalized features; without it the model defaults to a single
+# token output like 'ي' or blank).
+_load_cmvn_from_nemo(NEMO_PATH)
 
 log.info(f"Loading tokenizer: {TOKENIZER_PATH}")
 import sentencepiece as spm

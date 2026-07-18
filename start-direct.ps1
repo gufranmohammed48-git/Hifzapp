@@ -83,10 +83,19 @@ $env:NUM_THREADS    = "2"
 $env:WINDOW_SEC     = "1.0"
 $env:PORT           = "8080"
 
+# Point at the .nemo file if present (used to extract CMVN stats).
+$nemoFile = Join-Path $MODEL_DIR "fastconformer-quran.nemo"
+if (Test-Path $nemoFile) {
+    $env:NEMO_PATH = $nemoFile
+} else {
+    Write-Host "  (no fastconformer-quran.nemo found — CMVN will be skipped)" -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "Environment:" -ForegroundColor Cyan
 Write-Host "  MODEL_PATH     = $env:MODEL_PATH"
 Write-Host "  TOKENIZER_PATH = $env:TOKENIZER_PATH"
+Write-Host "  NEMO_PATH      = $env:NEMO_PATH"
 Write-Host "  STATIC_DIR     = $env:STATIC_DIR"
 Write-Host "  PORT           = $env:PORT"
 Write-Host "  NUM_THREADS    = $env:NUM_THREADS"
