@@ -57,24 +57,22 @@ $VENV_PY = Join-Path $VENV_DIR "Scripts\python.exe"
 if (-not (Test-Path $VENV_PY)) {
     Write-Host "Creating Python venv at $VENV_DIR..." -ForegroundColor Cyan
     python -m venv $VENV_DIR
-    Write-Host "Installing dependencies (2-3 min first time)..." -ForegroundColor Cyan
-    & "$VENV_DIR\Scripts\activate.ps1"
-    python -m pip install --upgrade pip | Out-Null
-    # --only-binary :all: prevents pip from trying to build packages
-    # from source (which needs Visual Studio Build Tools on Windows).
-    # If a package has no wheel for your Python, this surfaces a
-    # clear error instead of a confusing meson/MSVC trace.
-    pip install --only-binary :all: -r backend\requirements.txt
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "" -ForegroundColor Red
-        Write-Host "[ERROR] Failed to install dependencies" -ForegroundColor Red
-        Write-Host "Common cause: your Python version (likely 3.13) has no prebuilt wheels for some package." -ForegroundColor Yellow
-        Write-Host "Fix: install Python 3.12 from https://www.python.org/downloads/ and re-run this script." -ForegroundColor Yellow
-        exit 1
-    }
-} else {
-    Write-Host "Using existing venv at $VENV_DIR" -ForegroundColor Cyan
-    & "$VENV_DIR\Scripts\activate.ps1"
+}
+& "$VENV_DIR\Scripts\activate.ps1"
+
+# Always run pip install — if everything is up to date this is a fast
+# no-op ("Requirement already satisfied"). If the venv was created
+# previously but deps were never installed (e.g. build failed), this
+# fixes it. ~2-3 min first time, <5s after that.
+Write-Host "Installing dependencies (~2-3 min first time, <5s after)..." -ForegroundColor Cyan
+python -m pip install --upgrade pip | Out-Null
+pip install --only-binary :all: -r backend\requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "" -ForegroundColor Red
+    Write-Host "[ERROR] Failed to install dependencies" -ForegroundColor Red
+    Write-Host "Common cause: your Python version has no prebuilt wheels for some package." -ForegroundColor Yellow
+    Write-Host "Fix: install Python 3.12 from https://www.python.org/downloads/ and re-run this script." -ForegroundColor Yellow
+    exit 1
 }
 
 # ----- Set env vars -----
