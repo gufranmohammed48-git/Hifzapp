@@ -112,6 +112,9 @@ def _load_cmvn_from_nemo(nemo_path: str) -> None:
         return
     log.info(f"Extracting CMVN stats from {nemo_path} (one-time, ~5s)...")
     with tarfile.open(nemo_path, "r") as tar:
+        log.info(f"  .nemo contains {len(tar.getmembers())} files:")
+        for m in tar.getmembers()[:20]:
+            log.info(f"    {m.name} ({m.size:,} bytes)")
         ckpt_member = None
         for m in tar.getmembers():
             if m.name.endswith("model_weights.ckpt"):
@@ -340,6 +343,8 @@ class StreamState:
 
         # Run inference on the accumulated window
         audio = self.audio_buffer
+        rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) > 0 else 0.0
+        log.info(f"Inference input: audio={len(audio)} samples ({len(audio)/SAMPLE_RATE:.2f}s), RMS={rms:.4f}")
 
         # Despite the file name, model_with_encoder.q8.onnx does NOT
         # include the audio preprocessor. It expects mel features
@@ -348,6 +353,7 @@ class StreamState:
         # NeMo uses internally, so the features match the training
         # distribution.
         mel = compute_mel_features(audio)         # [80, T]
+        log.info(f"  mel shape={mel.shape}, mean={mel.mean():.3f}, std={mel.std():.3f}, min={mel.min():.3f}, max={mel.max():.3f}")
         audio_signal = mel[np.newaxis, :, :].astype(np.float32)  # [1, 80, T]
         length = np.array([mel.shape[1]], dtype=np.int64)
 
@@ -364,6 +370,18 @@ class StreamState:
         dt = (time.time() - t0) * 1000
 
         result = dict(zip(_output_names, outputs))
+
+        # DIAGNOSTIC: log model output details
+        if "logprobs" in result:
+            lp = result["logprobs"]
+            if lp.ndim == 3:
+                lp = lp[0]  # [T, 1025]
+            argmax = lp.argmax(axis=-1)  # [T]
+            unique, counts = np.unique(argmax, return_counts=True)
+            top3_idx = np.argsort(-counts)[:3]
+            top3 = [(int(unique[i]), int(counts[i]), sp.IdToPiece(int(unique[i])) if int(unique[i]) < sp.GetPieceSize() else '<OOB>') for i in top3_idx]
+            log.info(f"  logprobs: shape={lp.shape}, argmax unique classes (top3): {top3}")
+            log.info(f"    argmax sample: first 20 = {argmax[:20].tolist()}")
         text = decode_output(result)
 
         # Consume the audio we just inferred on
