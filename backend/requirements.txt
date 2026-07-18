@@ -1,15 +1,22 @@
 # Backend dependencies for the Hifzapp ASR (int8 ONNX FastConformer).
 #
 # Uses Muno459/fastconformer-quran's model_with_encoder.q8.onnx via
-# onnxruntime directly. The "with_encoder" export includes NeMo's
-# audio preprocessing inside the ONNX graph, so we just feed raw
-# 16kHz audio and get back logprobs/transcripts.
+# onnxruntime. Despite the name, this ONNX expects MEL FEATURES
+# ([B, 80, T]) as input, not raw audio — we compute them here
+# with torchaudio's MelSpectrogram (the same transform NeMo uses
+# internally, so the features match the training distribution).
 #
-# Image size: ~700MB (was ~3GB with NeMo).
+# Image size: ~1.5GB (was ~3GB with NeMo).
 # Latency:    ~300-600ms on Intel UHD (was 2-3s with NeMo).
 
 # Streaming ASR runtime
 onnxruntime>=1.17.0,<2.0
+
+# Audio preprocessing — torchaudio's MelSpectrogram matches NeMo's
+# internal preprocessor exactly. Both torch and torchaudio pulled
+# in because torchaudio alone isn't always installed with torch.
+torch>=2.1.0,<3.0
+torchaudio>=2.1.0,<3.0
 
 # SentencePiece tokenizer for decoding model output IDs to text
 sentencepiece>=0.2.0

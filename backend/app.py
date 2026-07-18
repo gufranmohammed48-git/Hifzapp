@@ -37,6 +37,12 @@ NUM_THREADS = int(os.environ.get("NUM_THREADS", "2"))
 PORT = int(os.environ.get("PORT", "8080"))
 WINDOW_SEC = float(os.environ.get("WINDOW_SEC", "1.0"))  # audio window per inference
 
+# Mel feature extraction params (must match NeMo's AudioToMelSpectrogram)
+# 25ms frame length, 10ms frame shift, 80 mel bins (standard for FastConformer)
+N_MELS = 80
+FRAME_LENGTH_MS = 25.0
+FRAME_SHIFT_MS = 10.0
+
 # ============================================================================
 # Arabic normalizer
 # ============================================================================
@@ -60,6 +66,47 @@ def normalize_arabic(text: str) -> str:
     text = text.replace("ة", "ه")
     text = _NON_ARABIC_RE.sub("", text)
     return text.strip()
+
+
+# ============================================================================
+# Mel feature extraction
+# ============================================================================
+# The 'model_with_encoder' ONNX file is misleadingly named — it does NOT
+# include the audio preprocessor. It expects mel features [B, 80, T] as
+# input, the same shape the streaming model expects. We compute them here
+# with torchaudio's MelSpectrogram, configured to match NeMo's defaults
+# (n_fft=512, win=400, hop=160, n_mels=80, log, no CMVN at this layer).
+#
+# If the model returns all-blank predictions, we'll need to add a CMVN
+# step (mean=0, std=1 normalization using stats from the .nemo file).
+
+import torchaudio.compliance.kaldi as kaldi  # noqa: E402  (after sys.exit guards)
+import torch  # noqa: E402  (torchaudio's underlying tensor lib)
+
+
+def compute_mel_features(audio: np.ndarray) -> np.ndarray:
+    """Convert raw 16kHz float32 audio to log-mel features [80, T].
+
+    Uses torchaudio's kaldi-compatible MelSpectrogram, which is the same
+    transform NeMo's AudioToMelSpectrogram uses internally. Returns shape
+    [n_mels, n_frames] ready to be unsqueezed to [B, n_mels, n_frames].
+    """
+    # torchaudio.compliance.kaldi.fbank expects float32 1D numpy/tensor
+    # and returns [T, n_mels] (time-major). We transpose to [n_mels, T]
+    # to match the model's expected input layout.
+    audio_tensor = torch.from_numpy(audio.astype(np.float32))
+    feats = kaldi.fbank(
+        audio_tensor,
+        sample_frequency=SAMPLE_RATE,
+        num_mel_bins=N_MELS,
+        frame_length=FRAME_LENGTH_MS,
+        frame_shift=FRAME_SHIFT_MS,
+        use_energy=False,
+        window_type="povey",
+        dither=0.0,
+    )
+    # kaldi.fbank returns [T, n_mels]; we want [n_mels, T]
+    return feats.transpose(0, 1).contiguous().numpy()
 
 
 # ============================================================================
@@ -209,11 +256,16 @@ class StreamState:
 
         # Run inference on the accumulated window
         audio = self.audio_buffer
-        # The 'with_encoder' model expects raw audio as [B, T, 1] (3D
-        # with explicit channel dim). Try that first; if it errors, the
-        # shape might be [B, 1, T] (channel-first) — we'll see.
-        audio_signal = audio[np.newaxis, :, np.newaxis].astype(np.float32)
-        length = np.array([audio.shape[0]], dtype=np.int64)
+
+        # Despite the file name, model_with_encoder.q8.onnx does NOT
+        # include the audio preprocessor. It expects mel features
+        # [B, 80, T] (80 mel bins × T time frames). We compute them
+        # here with torchaudio's MelSpectrogram — the same transform
+        # NeMo uses internally, so the features match the training
+        # distribution.
+        mel = compute_mel_features(audio)         # [80, T]
+        audio_signal = mel[np.newaxis, :, :].astype(np.float32)  # [1, 80, T]
+        length = np.array([mel.shape[1]], dtype=np.int64)
 
         t0 = time.time()
         try:
