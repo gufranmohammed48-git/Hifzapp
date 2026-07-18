@@ -80,7 +80,7 @@ $env:MODEL_PATH     = $modelFile
 $env:TOKENIZER_PATH = $tokFile
 $env:STATIC_DIR     = (Get-Location).Path
 $env:NUM_THREADS    = "2"
-$env:WINDOW_SEC     = "1.0"
+$env:WINDOW_SEC     = "2.0"
 $env:PORT           = "8080"
 
 # Point at the .nemo file if present (used to extract CMVN stats).

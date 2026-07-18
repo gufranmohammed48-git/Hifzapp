@@ -36,7 +36,7 @@ NEMO_PATH = os.environ.get("NEMO_PATH", "/data/fastconformer-quran.nemo")
 SAMPLE_RATE = 16000
 NUM_THREADS = int(os.environ.get("NUM_THREADS", "2"))
 PORT = int(os.environ.get("PORT", "8080"))
-WINDOW_SEC = float(os.environ.get("WINDOW_SEC", "1.0"))  # audio window per inference
+WINDOW_SEC = float(os.environ.get("WINDOW_SEC", "2.0"))  # audio window per inference
 
 # Mel feature extraction params (must match NeMo's AudioToMelSpectrogram)
 # 25ms frame length, 10ms frame shift, 80 mel bins (standard for FastConformer)

@@ -86,7 +86,7 @@ set "MODEL_PATH=%MODEL_DIR%\model_with_encoder.q8.onnx"
 set "TOKENIZER_PATH=%MODEL_DIR%\tokenizer.model"
 set "STATIC_DIR=%CD%"
 set "NUM_THREADS=2"
-set "WINDOW_SEC=1.0"
+set "WINDOW_SEC=2.0"
 set "PORT=8080"
 
 REM Point at the .nemo file if present (used to extract CMVN stats).
