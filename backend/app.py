@@ -209,7 +209,10 @@ class StreamState:
 
         # Run inference on the accumulated window
         audio = self.audio_buffer
-        audio_signal = audio[np.newaxis, :].astype(np.float32)
+        # The 'with_encoder' model expects raw audio as [B, T, 1] (3D
+        # with explicit channel dim). Try that first; if it errors, the
+        # shape might be [B, 1, T] (channel-first) — we'll see.
+        audio_signal = audio[np.newaxis, :, np.newaxis].astype(np.float32)
         length = np.array([audio.shape[0]], dtype=np.int64)
 
         t0 = time.time()
