@@ -91,10 +91,11 @@ def compute_mel_features(audio: np.ndarray) -> np.ndarray:
     transform NeMo's AudioToMelSpectrogram uses internally. Returns shape
     [n_mels, n_frames] ready to be unsqueezed to [B, n_mels, n_frames].
     """
-    # torchaudio.compliance.kaldi.fbank expects float32 1D numpy/tensor
-    # and returns [T, n_mels] (time-major). We transpose to [n_mels, T]
+    # torchaudio.compliance.kaldi.fbank expects float32 tensor with
+    # shape [channel, samples] (2D). We add a leading channel dim.
+    # Returns [T, n_mels] (time-major) which we transpose to [n_mels, T]
     # to match the model's expected input layout.
-    audio_tensor = torch.from_numpy(audio.astype(np.float32))
+    audio_tensor = torch.from_numpy(audio.astype(np.float32)).unsqueeze(0)  # [1, samples]
     feats = kaldi.fbank(
         audio_tensor,
         sample_frequency=SAMPLE_RATE,
