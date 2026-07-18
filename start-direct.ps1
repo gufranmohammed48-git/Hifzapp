@@ -60,7 +60,7 @@ if (-not (Test-Path $VENV_PY)) {
 }
 & "$VENV_DIR\Scripts\activate.ps1"
 
-# Always run pip install — if everything is up to date this is a fast
+# Always run pip install - if everything is up to date this is a fast
 # no-op ("Requirement already satisfied"). If the venv was created
 # previously but deps were never installed (e.g. build failed), this
 # fixes it. ~2-3 min first time, <5s after that.
@@ -88,7 +88,7 @@ $nemoFile = Join-Path $MODEL_DIR "fastconformer-quran.nemo"
 if (Test-Path $nemoFile) {
     $env:NEMO_PATH = $nemoFile
 } else {
-    Write-Host "  (no fastconformer-quran.nemo found — CMVN will be skipped)" -ForegroundColor Yellow
+    Write-Host "  (no fastconformer-quran.nemo found - CMVN will be skipped)" -ForegroundColor Yellow
 }
 
 Write-Host ""
