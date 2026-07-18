@@ -60,9 +60,16 @@ if (-not (Test-Path $VENV_PY)) {
     Write-Host "Installing dependencies (2-3 min first time)..." -ForegroundColor Cyan
     & "$VENV_DIR\Scripts\activate.ps1"
     python -m pip install --upgrade pip | Out-Null
-    pip install -r backend\requirements.txt
+    # --only-binary :all: prevents pip from trying to build packages
+    # from source (which needs Visual Studio Build Tools on Windows).
+    # If a package has no wheel for your Python, this surfaces a
+    # clear error instead of a confusing meson/MSVC trace.
+    pip install --only-binary :all: -r backend\requirements.txt
     if ($LASTEXITCODE -ne 0) {
+        Write-Host "" -ForegroundColor Red
         Write-Host "[ERROR] Failed to install dependencies" -ForegroundColor Red
+        Write-Host "Common cause: your Python version (likely 3.13) has no prebuilt wheels for some package." -ForegroundColor Yellow
+        Write-Host "Fix: install Python 3.12 from https://www.python.org/downloads/ and re-run this script." -ForegroundColor Yellow
         exit 1
     }
 } else {

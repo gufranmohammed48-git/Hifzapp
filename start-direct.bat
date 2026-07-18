@@ -65,9 +65,15 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
     echo Installing dependencies (this takes 2-3 min the first time)...
     call %VENV_DIR%\Scripts\activate.bat
     python -m pip install --upgrade pip
-    pip install -r backend\requirements.txt
+    REM --only-binary :all: prevents pip from building from source
+    REM (which needs Visual Studio Build Tools on Windows).
+    pip install --only-binary :all: -r backend\requirements.txt
     if errorlevel 1 (
+        echo.
         echo [ERROR] Failed to install dependencies
+        echo Common cause: your Python version (likely 3.13) has no
+        echo prebuilt wheels for some package. Install Python 3.12 from
+        echo https://www.python.org/downloads/ and re-run this script.
         goto :end
     )
 ) else (

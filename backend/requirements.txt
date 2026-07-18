@@ -28,4 +28,7 @@ python-multipart==0.0.9
 websockets==12.0
 
 # Math
-numpy>=1.22,<2.0
+# No upper bound — numpy 1.26.x has no Python 3.13 wheel, pip would try
+# to build from source and fail (needs Visual Studio Build Tools).
+# numpy 2.0+ has wheels for all current Python versions.
+numpy>=1.22
